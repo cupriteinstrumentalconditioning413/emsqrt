@@ -1,6 +1,6 @@
 # EM-√ (EM-Sqrt): External-Memory ETL Engine
 
-**Process any dataset size with a fixed, small memory footprint.**
+## **Process any dataset size with a fixed, small memory footprint.**
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-1.70+-orange.svg)](https://www.rust-lang.org/)
