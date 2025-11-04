@@ -86,7 +86,7 @@ pub fn estimate_work(plan: &LogicalPlan, hints: Option<&WorkHint>) -> WorkEstima
         }
     }
 
-    let _rows_out = walk(
+    let rows_out = walk(
         plan,
         hints,
         &mut total_rows,
@@ -94,7 +94,7 @@ pub fn estimate_work(plan: &LogicalPlan, hints: Option<&WorkHint>) -> WorkEstima
         &mut max_fan_in,
     );
     WorkEstimate {
-        total_rows,
+        total_rows: rows_out, // Use output rows, not accumulated input rows
         total_bytes,
         max_fan_in,
     }

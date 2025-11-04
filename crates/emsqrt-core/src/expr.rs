@@ -91,23 +91,84 @@ pub enum Expr {
 impl Expr {
     /// Parse a simple expression string into an Expr AST.
     ///
-    /// Currently supports simple predicates like "col OP literal" or "col1 OP col2".
-    /// More complex expressions (with parentheses, AND/OR) will be added later.
+    /// Supports expressions with proper operator precedence:
+    /// - Logical operators (AND/OR) have lowest precedence
+    /// - Comparison operators (==, !=, <, <=, >, >=)
+    /// - Arithmetic operators (+, -, *, /) have highest precedence
     pub fn parse(expr_str: &str) -> Result<Self, String> {
         let expr_str = expr_str.trim();
         
-        // Try to parse simple binary operations
-        let ops = ["==", "!=", "<=", ">=", "<", ">", "+", "-", "*", "/", "AND", "OR"];
+        // Parse with operator precedence: logical operators last (lowest precedence)
+        // This allows expressions like "age > 20 AND price < 15" to be parsed correctly
         
-        for op_str in &ops {
+        // First, try to find logical operators (AND/OR) - these have lowest precedence
+        // We need to find the rightmost AND/OR to handle left-associativity
+        // Check for " AND " first (with spaces), then " OR " (with spaces)
+        // This avoids matching "AND" inside column names
+        let logical_ops = [
+            (" AND ", BinOp::And),
+            (" OR ", BinOp::Or),
+        ];
+        
+        // Find the rightmost logical operator
+        let mut best_pos: Option<usize> = None;
+        let mut best_op: Option<BinOp> = None;
+        let mut best_op_str: Option<&str> = None;
+        
+        for (op_str, op) in &logical_ops {
+            if let Some(pos) = expr_str.rfind(op_str) {
+                if best_pos.map_or(true, |best| pos > best) {
+                    best_pos = Some(pos);
+                    best_op = Some(*op);
+                    best_op_str = Some(op_str);
+                }
+            }
+        }
+        
+        if let (Some(pos), Some(op), Some(op_str)) = (best_pos, best_op, best_op_str) {
+            let left_str = expr_str[..pos].trim();
+            let right_str = expr_str[pos + op_str.len()..].trim();
+            
+            if !left_str.is_empty() && !right_str.is_empty() {
+                let left = Self::parse(left_str)?;  // Recursive parse
+                let right = Self::parse(right_str)?; // Recursive parse
+                return Ok(Expr::BinaryOp {
+                    op,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                });
+            }
+        }
+        
+        // Then, try comparison operators
+        for op_str in &["==", "!=", "<=", ">=", "<", ">"] {
             if let Some(pos) = expr_str.find(op_str) {
                 let left_str = expr_str[..pos].trim();
                 let right_str = expr_str[pos + op_str.len()..].trim();
                 
                 if !left_str.is_empty() && !right_str.is_empty() {
                     let op = BinOp::parse(op_str)?;
-                    let left = Self::parse_atom(left_str)?;
-                    let right = Self::parse_atom(right_str)?;
+                    let left = Self::parse(left_str)?;  // Recursive parse for nested expressions
+                    let right = Self::parse(right_str)?; // Recursive parse for nested expressions
+                    return Ok(Expr::BinaryOp {
+                        op,
+                        left: Box::new(left),
+                        right: Box::new(right),
+                    });
+                }
+            }
+        }
+        
+        // Finally, try arithmetic operators (highest precedence)
+        for op_str in &["+", "-", "*", "/"] {
+            if let Some(pos) = expr_str.find(op_str) {
+                let left_str = expr_str[..pos].trim();
+                let right_str = expr_str[pos + op_str.len()..].trim();
+                
+                if !left_str.is_empty() && !right_str.is_empty() {
+                    let op = BinOp::parse(op_str)?;
+                    let left = Self::parse(left_str)?;  // Recursive parse for nested expressions
+                    let right = Self::parse(right_str)?; // Recursive parse for nested expressions
                     return Ok(Expr::BinaryOp {
                         op,
                         left: Box::new(left),
@@ -241,6 +302,21 @@ fn evaluate_binary_op(op: BinOp, left: &Scalar, right: &Scalar) -> Result<Scalar
                 (F32(a), F32(b)) => Ok(Scalar::F32(a + b)),
                 (F64(a), F64(b)) => Ok(Scalar::F64(a + b)),
                 (Str(a), Str(b)) => Ok(Scalar::Str(format!("{}{}", a, b))),
+                // Cross-type integer operations
+                (I32(a), I64(b)) => Ok(Scalar::I64(*a as i64 + b)),
+                (I64(a), I32(b)) => Ok(Scalar::I64(a + *b as i64)),
+                // Cross-type float operations
+                (I32(a), F32(b)) => Ok(Scalar::F32(*a as f32 + b)),
+                (F32(a), I32(b)) => Ok(Scalar::F32(a + *b as f32)),
+                (I32(a), F64(b)) => Ok(Scalar::F64(*a as f64 + b)),
+                (F64(a), I32(b)) => Ok(Scalar::F64(a + *b as f64)),
+                (I64(a), F32(b)) => Ok(Scalar::F32(*a as f32 + b)),
+                (F32(a), I64(b)) => Ok(Scalar::F32(a + *b as f32)),
+                (I64(a), F64(b)) => Ok(Scalar::F64(*a as f64 + b)),
+                (F64(a), I64(b)) => Ok(Scalar::F64(a + *b as f64)),
+                // Cross-type float operations (F32/F64)
+                (F32(a), F64(b)) => Ok(Scalar::F64(*a as f64 + b)),
+                (F64(a), F32(b)) => Ok(Scalar::F64(a + *b as f64)),
                 _ => Err(format!("unsupported addition: {:?} + {:?}", left, right)),
             }
         }
@@ -250,6 +326,21 @@ fn evaluate_binary_op(op: BinOp, left: &Scalar, right: &Scalar) -> Result<Scalar
                 (I64(a), I64(b)) => Ok(Scalar::I64(a - b)),
                 (F32(a), F32(b)) => Ok(Scalar::F32(a - b)),
                 (F64(a), F64(b)) => Ok(Scalar::F64(a - b)),
+                // Cross-type integer operations
+                (I32(a), I64(b)) => Ok(Scalar::I64(*a as i64 - b)),
+                (I64(a), I32(b)) => Ok(Scalar::I64(a - *b as i64)),
+                // Cross-type float operations
+                (I32(a), F32(b)) => Ok(Scalar::F32(*a as f32 - b)),
+                (F32(a), I32(b)) => Ok(Scalar::F32(a - *b as f32)),
+                (I32(a), F64(b)) => Ok(Scalar::F64(*a as f64 - b)),
+                (F64(a), I32(b)) => Ok(Scalar::F64(a - *b as f64)),
+                (I64(a), F32(b)) => Ok(Scalar::F32(*a as f32 - b)),
+                (F32(a), I64(b)) => Ok(Scalar::F32(a - *b as f32)),
+                (I64(a), F64(b)) => Ok(Scalar::F64(*a as f64 - b)),
+                (F64(a), I64(b)) => Ok(Scalar::F64(a - *b as f64)),
+                // Cross-type float operations (F32/F64)
+                (F32(a), F64(b)) => Ok(Scalar::F64(*a as f64 - b)),
+                (F64(a), F32(b)) => Ok(Scalar::F64(a - *b as f64)),
                 _ => Err(format!("unsupported subtraction: {:?} - {:?}", left, right)),
             }
         }
@@ -259,6 +350,21 @@ fn evaluate_binary_op(op: BinOp, left: &Scalar, right: &Scalar) -> Result<Scalar
                 (I64(a), I64(b)) => Ok(Scalar::I64(a * b)),
                 (F32(a), F32(b)) => Ok(Scalar::F32(a * b)),
                 (F64(a), F64(b)) => Ok(Scalar::F64(a * b)),
+                // Cross-type integer operations
+                (I32(a), I64(b)) => Ok(Scalar::I64(*a as i64 * b)),
+                (I64(a), I32(b)) => Ok(Scalar::I64(a * *b as i64)),
+                // Cross-type float operations
+                (I32(a), F32(b)) => Ok(Scalar::F32(*a as f32 * b)),
+                (F32(a), I32(b)) => Ok(Scalar::F32(a * *b as f32)),
+                (I32(a), F64(b)) => Ok(Scalar::F64(*a as f64 * b)),
+                (F64(a), I32(b)) => Ok(Scalar::F64(a * *b as f64)),
+                (I64(a), F32(b)) => Ok(Scalar::F32(*a as f32 * b)),
+                (F32(a), I64(b)) => Ok(Scalar::F32(a * *b as f32)),
+                (I64(a), F64(b)) => Ok(Scalar::F64(*a as f64 * b)),
+                (F64(a), I64(b)) => Ok(Scalar::F64(a * *b as f64)),
+                // Cross-type float operations (F32/F64)
+                (F32(a), F64(b)) => Ok(Scalar::F64(*a as f64 * b)),
+                (F64(a), F32(b)) => Ok(Scalar::F64(a * *b as f64)),
                 _ => Err(format!("unsupported multiplication: {:?} * {:?}", left, right)),
             }
         }
@@ -287,6 +393,81 @@ fn evaluate_binary_op(op: BinOp, left: &Scalar, right: &Scalar) -> Result<Scalar
                         return Err("division by zero".to_string());
                     }
                     Ok(Scalar::F64(a / b))
+                }
+                // Cross-type integer operations
+                (I32(a), I64(b)) => {
+                    if *b == 0 {
+                        return Err("division by zero".to_string());
+                    }
+                    Ok(Scalar::I64(*a as i64 / b))
+                }
+                (I64(a), I32(b)) => {
+                    if *b == 0 {
+                        return Err("division by zero".to_string());
+                    }
+                    Ok(Scalar::I64(a / *b as i64))
+                }
+                // Cross-type float operations
+                (I32(a), F32(b)) => {
+                    if *b == 0.0 {
+                        return Err("division by zero".to_string());
+                    }
+                    Ok(Scalar::F32(*a as f32 / b))
+                }
+                (F32(a), I32(b)) => {
+                    if *b == 0 {
+                        return Err("division by zero".to_string());
+                    }
+                    Ok(Scalar::F32(a / *b as f32))
+                }
+                (I32(a), F64(b)) => {
+                    if *b == 0.0 {
+                        return Err("division by zero".to_string());
+                    }
+                    Ok(Scalar::F64(*a as f64 / b))
+                }
+                (F64(a), I32(b)) => {
+                    if *b == 0 {
+                        return Err("division by zero".to_string());
+                    }
+                    Ok(Scalar::F64(a / *b as f64))
+                }
+                (I64(a), F32(b)) => {
+                    if *b == 0.0 {
+                        return Err("division by zero".to_string());
+                    }
+                    Ok(Scalar::F32(*a as f32 / b))
+                }
+                (F32(a), I64(b)) => {
+                    if *b == 0 {
+                        return Err("division by zero".to_string());
+                    }
+                    Ok(Scalar::F32(a / *b as f32))
+                }
+                (I64(a), F64(b)) => {
+                    if *b == 0.0 {
+                        return Err("division by zero".to_string());
+                    }
+                    Ok(Scalar::F64(*a as f64 / b))
+                }
+                (F64(a), I64(b)) => {
+                    if *b == 0 {
+                        return Err("division by zero".to_string());
+                    }
+                    Ok(Scalar::F64(a / *b as f64))
+                }
+                // Cross-type float operations (F32/F64)
+                (F32(a), F64(b)) => {
+                    if *b == 0.0 {
+                        return Err("division by zero".to_string());
+                    }
+                    Ok(Scalar::F64(*a as f64 / b))
+                }
+                (F64(a), F32(b)) => {
+                    if *b == 0.0 {
+                        return Err("division by zero".to_string());
+                    }
+                    Ok(Scalar::F64(a / *b as f64))
                 }
                 _ => Err(format!("unsupported division: {:?} / {:?}", left, right)),
             }

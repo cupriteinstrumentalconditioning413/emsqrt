@@ -140,24 +140,61 @@ impl ColumnStats {
                 0.3 // Conservative estimate
             }
             (Some(min), None) => {
-                // value >= min
-                if scalar_cmp(min, &self.max.as_ref().unwrap()).is_gt() {
-                    return 0.0;
+                // value >= min (or value > min for strict inequality)
+                let col_min = self.min.as_ref().unwrap();
+                let col_max = self.max.as_ref().unwrap();
+                
+                if scalar_cmp(min, col_max).is_gt() {
+                    return 0.0; // All values are below min
                 }
-                if scalar_cmp(min, &self.min.as_ref().unwrap()).is_le() {
-                    return 1.0;
+                if scalar_cmp(min, col_min).is_le() {
+                    return 1.0; // All values are above min
                 }
-                0.5 // Conservative estimate
+                
+                // Estimate selectivity based on range: assume uniform distribution
+                // Fraction of range that passes: (col_max - min) / (col_max - col_min)
+                // This is approximate and assumes uniform distribution
+                if let (Some(min_val), Some(max_val)) = (
+                    scalar_to_f64(col_min),
+                    scalar_to_f64(col_max)
+                ) {
+                    if let Some(threshold) = scalar_to_f64(min) {
+                        if max_val > min_val {
+                            let selectivity = (max_val - threshold) / (max_val - min_val);
+                            return selectivity.max(0.0).min(1.0);
+                        }
+                    }
+                }
+                
+                0.5 // Fallback: conservative estimate
             }
             (None, Some(max)) => {
-                // value <= max
-                if scalar_cmp(max, &self.min.as_ref().unwrap()).is_lt() {
-                    return 0.0;
+                // value <= max (or value < max for strict inequality)
+                let col_min = self.min.as_ref().unwrap();
+                let col_max = self.max.as_ref().unwrap();
+                
+                if scalar_cmp(max, col_min).is_lt() {
+                    return 0.0; // All values are above max
                 }
-                if scalar_cmp(max, &self.max.as_ref().unwrap()).is_ge() {
-                    return 1.0;
+                if scalar_cmp(max, col_max).is_ge() {
+                    return 1.0; // All values are below max
                 }
-                0.5 // Conservative estimate
+                
+                // Estimate selectivity based on range: assume uniform distribution
+                // Fraction of range that passes: (max - col_min) / (col_max - col_min)
+                if let (Some(min_val), Some(max_val)) = (
+                    scalar_to_f64(col_min),
+                    scalar_to_f64(col_max)
+                ) {
+                    if let Some(threshold) = scalar_to_f64(max) {
+                        if max_val > min_val {
+                            let selectivity = (threshold - min_val) / (max_val - min_val);
+                            return selectivity.max(0.0).min(1.0);
+                        }
+                    }
+                }
+                
+                0.5 // Fallback: conservative estimate
             }
             (None, None) => 1.0,
         }
@@ -242,6 +279,19 @@ impl SchemaStats {
 impl Default for SchemaStats {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Convert a Scalar to f64 for numeric calculations.
+/// Returns None if the scalar cannot be converted to a number.
+fn scalar_to_f64(s: &Scalar) -> Option<f64> {
+    use Scalar::*;
+    match s {
+        I32(x) => Some(*x as f64),
+        I64(x) => Some(*x as f64),
+        F32(x) => Some(*x as f64),
+        F64(x) => Some(*x),
+        _ => None,
     }
 }
 
