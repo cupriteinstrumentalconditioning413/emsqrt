@@ -450,6 +450,6 @@ This project implements Tree Evaluation (TE) scheduling for external-memory quer
 
 ---
 
-**Remember**: EM-√ trades throughput for guaranteed memory bounds. Use it when memory constraints are more important than raw speed.
+**Take-home**: EM-√ trades throughput for guaranteed memory bounds. Use it when memory constraints are more important than raw speed.
 
 Repo is a dynamic work, please be aware that it will evolve and further develop over time.
