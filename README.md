@@ -118,7 +118,7 @@ steps:
       format: "csv"
 ```
 
-## 📊 Use Cases
+## Examples of Practical Use Cases
 
 ### 1. Serverless Data Pipelines
 
