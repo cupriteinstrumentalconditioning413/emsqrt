@@ -1,0 +1,36 @@
+[package]
+name = "emsqrt-io"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "IO adapters and streaming readers/writers for EM-√"
+repository = "https://github.com/your-org/emsqrt"
+
+[lib]
+name = "emsqrt_io"
+path = "src/lib.rs"
+
+[features]
+# Optional parquet/arrow integration (placeholder module compiled only when enabled).
+parquet = ["dep:parquet", "dep:arrow-schema", "dep:arrow-array"]
+# Optional cloud object stores (placeholders returning TODO errors for now).
+s3 = []
+gcs = []
+azure = []
+
+[dependencies]
+emsqrt-core = { path = "../emsqrt-core", package = "emsqrt-core" }
+emsqrt-mem  = { path = "../emsqrt-mem",  package = "emsqrt-mem" }
+
+thiserror = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+csv = "1"
+
+# Only when parquet feature is enabled
+parquet = { version = "52", optional = true }
+arrow-schema = { version = "52", optional = true }
+arrow-array = { version = "52", optional = true }
+
+# Utility
+blake3 = "1"

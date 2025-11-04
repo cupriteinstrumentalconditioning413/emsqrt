@@ -1,0 +1,19 @@
+[package]
+name = "emsqrt-planner"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Logical planning, minimal optimization rules, and lowering to physical plan for EM-√"
+
+[lib]
+name = "emsqrt_planner"
+path = "src/lib.rs"
+
+[dependencies]
+emsqrt-core = { path = "../emsqrt-core", package = "emsqrt-core" }
+emsqrt-te   = { path = "../emsqrt-te",   package = "emsqrt-te" }
+
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+serde_json = "1"
+thiserror = "1"

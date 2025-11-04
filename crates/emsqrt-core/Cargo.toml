@@ -1,0 +1,27 @@
+[package]
+name = "emsqrt-core"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Core types, IDs, configs, DAG nodes, manifests, and hashing for the EM-√ engine"
+repository = "https://github.com/logannye/emsqrt"
+readme = "README.md"
+
+[lib]
+name = "emsqrt_core"
+path = "src/lib.rs"
+
+[features]
+# In the future you can gate Arrow/Parquet integration here (keep core lean).
+# arrow = []
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+blake3 = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+# Keep deps minimal; no async/runtime/IO in core.
+
+[dev-dependencies]
+serde_json = "1"

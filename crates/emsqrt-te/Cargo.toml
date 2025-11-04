@@ -1,0 +1,22 @@
+[package]
+name = "emsqrt-te"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Tree Evaluation planning and scheduling for the EM-√ engine"
+
+[lib]
+name = "emsqrt_te"
+path = "src/lib.rs"
+
+[features]
+# Optional hybrid strategies that mix pebbling/recursion with TE planning.
+pebble = []
+
+[dependencies]
+emsqrt-core = { path = "../emsqrt-core", package = "emsqrt-core" }
+serde = { version = "1", features = ["derive"] }
+thiserror = "1"
+
+[dev-dependencies]
+serde_json = "1"

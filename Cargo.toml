@@ -1,0 +1,51 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/emsqrt-core",
+    "crates/emsqrt-te",
+    "crates/emsqrt-mem",
+    "crates/emsqrt-io",
+    "crates/emsqrt-operators",
+    "crates/emsqrt-planner",
+    "crates/emsqrt-exec",
+    "crates/tests",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/logannye/emsqrt"
+
+[workspace.dependencies]
+# Shared dependencies across crates
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+blake3 = "1"
+
+# Feature-gated heavy dependencies (not marked optional at workspace level)
+arrow = { version = "53" }
+parquet = { version = "53" }
+zstd = { version = "0.13" }
+lz4 = { version = "1.24" }
+tracing = { version = "0.1" }
+
+# Internal workspace dependencies
+emsqrt-core = { path = "crates/emsqrt-core" }
+emsqrt-te = { path = "crates/emsqrt-te" }
+emsqrt-mem = { path = "crates/emsqrt-mem" }
+emsqrt-io = { path = "crates/emsqrt-io" }
+emsqrt-operators = { path = "crates/emsqrt-operators" }
+emsqrt-planner = { path = "crates/emsqrt-planner" }
+emsqrt-exec = { path = "crates/emsqrt-exec" }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+
+[profile.dev]
+opt-level = 0
+debug = true
+
