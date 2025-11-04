@@ -1,9 +1,9 @@
 # EM-√ (EM-Sqrt): External-Memory ETL Engine
-
 ## **Process any dataset size with a fixed, small memory footprint.**
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-1.70+-orange.svg)](https://www.rust-lang.org/)
+
 
 EM-√ is an external-memory ETL/log processing engine with **hard peak-RAM guarantees**. Unlike traditional systems that "try" to stay within memory limits, EM-√ **enforces** a strict memory cap, enabling you to process arbitrarily large datasets using small memory footprints.
 
