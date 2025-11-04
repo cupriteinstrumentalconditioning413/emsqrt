@@ -403,13 +403,6 @@ Contributions are welcome! Areas of particular interest:
 - Performance optimizations
 - Documentation improvements
 
-<<<<<<< HEAD
-## License
-
-Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for details.
-
-=======
->>>>>>> 477c699 (Fix projection pushdown bug and enhance error handling)
 ## Acknowledgments
 
 This project implements Tree Evaluation (TE) scheduling for external-memory query processing, enabling predictable memory usage in constrained environments.
