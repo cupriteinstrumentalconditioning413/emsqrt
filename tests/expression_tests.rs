@@ -110,4 +110,3 @@ fn test_unaryop_parse() {
     assert_eq!(UnaryOp::parse("IS NOT NULL"), Ok(UnaryOp::IsNotNull));
     assert!(UnaryOp::parse("invalid").is_err());
 }
-

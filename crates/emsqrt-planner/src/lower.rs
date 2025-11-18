@@ -8,9 +8,9 @@
 
 use std::collections::BTreeMap;
 
-use emsqrt_core::dag::{LogicalPlan, PhysicalPlan};
+use emsqrt_core::dag::{LogicalPlan, PhysicalPlan, WindowFrameBound, WindowFunction};
 use emsqrt_core::id::OpId;
-use emsqrt_core::schema::Schema;
+use emsqrt_core::schema::{DataType, Field, Schema};
 
 use crate::physical::{OperatorBinding, PhysicalProgram};
 
@@ -38,6 +38,28 @@ pub fn lower_to_physical(lp: &LogicalPlan) -> PhysicalProgram {
             | Project { input, .. }
             | Aggregate { input, .. }
             | Sink { input, .. } => schema_of(input),
+            Window {
+                input, functions, ..
+            } => {
+                let mut schema = schema_of(input);
+                for expr in functions {
+                    let data_type = match &expr.function {
+                        WindowFunction::RowNumber => DataType::Int64,
+                        WindowFunction::Sum { .. } => DataType::Float64,
+                    };
+                    schema
+                        .fields
+                        .push(Field::new(expr.alias.clone(), data_type, true));
+                }
+                schema
+            }
+            Lateral { input, alias, .. } => {
+                let mut schema = schema_of(input);
+                schema
+                    .fields
+                    .push(Field::new(alias.clone(), DataType::Utf8, true));
+                schema
+            }
             Join { left, .. } => schema_of(left), // TODO: real join schema
         }
     }
@@ -114,21 +136,26 @@ pub fn lower_to_physical(lp: &LogicalPlan) -> PhysicalProgram {
                     schema: schema_of(lp),
                 }
             }
-            Aggregate { input, group_by, aggs } => {
+            Aggregate {
+                input,
+                group_by,
+                aggs,
+            } => {
                 let child = lower_rec(input, next_id, bindings);
                 let op = alloc_id(next_id);
-                
+
                 // Serialize aggs to strings (format expected by Aggregate::parse)
-                let aggs_str: Vec<String> = aggs.iter().map(|a| {
-                    match a {
+                let aggs_str: Vec<String> = aggs
+                    .iter()
+                    .map(|a| match a {
                         emsqrt_core::dag::Aggregation::Count => "count".to_string(),
                         emsqrt_core::dag::Aggregation::Sum(col) => format!("sum:{}", col),
                         emsqrt_core::dag::Aggregation::Avg(col) => format!("avg:{}", col),
                         emsqrt_core::dag::Aggregation::Min(col) => format!("min:{}", col),
                         emsqrt_core::dag::Aggregation::Max(col) => format!("max:{}", col),
-                    }
-                }).collect();
-                
+                    })
+                    .collect();
+
                 bindings.insert(
                     op,
                     OperatorBinding {
@@ -136,6 +163,86 @@ pub fn lower_to_physical(lp: &LogicalPlan) -> PhysicalProgram {
                         config: serde_json::json!({
                             "group_by": group_by,
                             "aggs": aggs_str
+                        }),
+                    },
+                );
+                PhysicalPlan::Unary {
+                    op,
+                    input: Box::new(child),
+                    schema: schema_of(lp),
+                }
+            }
+            Window {
+                input,
+                partitions,
+                order_by,
+                functions,
+            } => {
+                let child = lower_rec(input, next_id, bindings);
+                let op = alloc_id(next_id);
+                let funcs_json: Vec<serde_json::Value> = functions
+                    .iter()
+                    .map(|expr| {
+                        let kind = match &expr.function {
+                            WindowFunction::RowNumber => serde_json::json!({
+                                "kind": "row_number"
+                            }),
+                            WindowFunction::Sum { column } => serde_json::json!({
+                                "kind": "sum",
+                                "column": column
+                            }),
+                        };
+                        let start = match expr.frame.start {
+                            WindowFrameBound::UnboundedPreceding => "unbounded_preceding",
+                            WindowFrameBound::CurrentRow => "current_row",
+                        };
+                        let end = match expr.frame.end {
+                            WindowFrameBound::UnboundedPreceding => "unbounded_preceding",
+                            WindowFrameBound::CurrentRow => "current_row",
+                        };
+                        serde_json::json!({
+                            "alias": expr.alias,
+                            "function": kind,
+                            "frame": {
+                                "start": start,
+                                "end": end
+                            }
+                        })
+                    })
+                    .collect();
+                bindings.insert(
+                    op,
+                    OperatorBinding {
+                        key: "window".to_string(),
+                        config: serde_json::json!({
+                            "partitions": partitions,
+                            "order_by": order_by,
+                            "functions": funcs_json
+                        }),
+                    },
+                );
+                PhysicalPlan::Unary {
+                    op,
+                    input: Box::new(child),
+                    schema: schema_of(lp),
+                }
+            }
+            Lateral {
+                input,
+                column,
+                alias,
+                delimiter,
+            } => {
+                let child = lower_rec(input, next_id, bindings);
+                let op = alloc_id(next_id);
+                bindings.insert(
+                    op,
+                    OperatorBinding {
+                        key: "lateral_explode".to_string(),
+                        config: serde_json::json!({
+                            "column": column,
+                            "alias": alias,
+                            "delimiter": delimiter.clone().unwrap_or_else(|| ",".into())
                         }),
                     },
                 );
@@ -163,7 +270,11 @@ pub fn lower_to_physical(lp: &LogicalPlan) -> PhysicalProgram {
                     schema: schema_of(lp),
                 }
             }
-            Sink { input, destination, format } => {
+            Sink {
+                input,
+                destination,
+                format,
+            } => {
                 let child = lower_rec(input, next_id, bindings);
                 let op = alloc_id(next_id);
                 bindings.insert(

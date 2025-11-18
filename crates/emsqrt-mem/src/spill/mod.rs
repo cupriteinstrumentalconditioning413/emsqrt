@@ -84,8 +84,8 @@ impl SpillManager {
         run_index: u32,
     ) -> Result<SegmentMeta> {
         // Serialize batch
-        let uncompressed = serde_json::to_vec(batch)
-            .map_err(|e| Error::Codec(format!("json serialize: {e}")))?;
+        let uncompressed =
+            serde_json::to_vec(batch).map_err(|e| Error::Codec(format!("json serialize: {e}")))?;
         let uncompressed_len = uncompressed.len() as u64;
 
         // Compress

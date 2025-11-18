@@ -58,11 +58,58 @@ pub enum LogicalPlan {
         group_by: Vec<String>,
         aggs: Vec<Aggregation>,
     },
+    Window {
+        input: Box<LogicalPlan>,
+        partitions: Vec<String>,
+        order_by: Vec<String>,
+        functions: Vec<WindowExpr>,
+    },
+    Lateral {
+        input: Box<LogicalPlan>,
+        column: String,
+        alias: String,
+        delimiter: Option<String>,
+    },
     Sink {
         input: Box<LogicalPlan>,
         destination: String, // e.g., "s3://bucket/out/"
         format: String,      // "parquet", "csv", ...
     },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WindowExpr {
+    pub function: WindowFunction,
+    pub alias: String,
+    #[serde(default)]
+    pub frame: WindowFrame,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum WindowFunction {
+    RowNumber,
+    Sum { column: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WindowFrame {
+    pub start: WindowFrameBound,
+    pub end: WindowFrameBound,
+}
+
+impl Default for WindowFrame {
+    fn default() -> Self {
+        Self {
+            start: WindowFrameBound::UnboundedPreceding,
+            end: WindowFrameBound::CurrentRow,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum WindowFrameBound {
+    UnboundedPreceding,
+    CurrentRow,
 }
 
 /// Physical nodes bind to operator IDs (resolved in `emsqrt-operators`).
@@ -95,7 +142,13 @@ impl LogicalPlan {
         use LogicalPlan::*;
         match self {
             Scan { .. } => 0,
-            Filter { .. } | Map { .. } | Project { .. } | Aggregate { .. } | Sink { .. } => 1,
+            Filter { .. }
+            | Map { .. }
+            | Project { .. }
+            | Aggregate { .. }
+            | Window { .. }
+            | Lateral { .. }
+            | Sink { .. } => 1,
             Join { .. } => 2,
         }
     }

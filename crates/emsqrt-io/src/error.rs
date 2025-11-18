@@ -20,6 +20,9 @@ pub enum Error {
     #[error("schema error: {0}")]
     Schema(String),
 
+    #[error("config error: {0}")]
+    Config(String),
+
     #[error("not implemented: {0}")]
     Unimplemented(&'static str),
 

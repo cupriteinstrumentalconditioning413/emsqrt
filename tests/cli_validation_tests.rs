@@ -16,7 +16,7 @@ steps:
     destination: "out.csv"
     format: "csv"
 "#;
-    
+
     let result = parse_yaml_pipeline(yaml);
     assert!(result.is_ok());
 }
@@ -41,7 +41,7 @@ steps:
     destination: "out.csv"
     format: "csv"
 "#;
-    
+
     let result = parse_yaml_pipeline(yaml);
     assert!(result.is_ok());
 }
@@ -63,7 +63,7 @@ steps:
         type: "Int64"
         nullable: false
 "#;
-    
+
     // Note: Join parsing might not be fully implemented yet
     // This test validates that the YAML structure is acceptable
     let result = parse_yaml_pipeline(yaml);
@@ -71,4 +71,3 @@ steps:
     // The important thing is it doesn't panic
     assert!(result.is_ok() || result.is_err());
 }
-

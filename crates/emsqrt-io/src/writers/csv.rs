@@ -8,7 +8,7 @@ use std::io::Write;
 use csv as csv_crate;
 use emsqrt_core::types::RowBatch;
 
-use crate::error::{Error, Result};
+use crate::error::Result;
 
 pub struct CsvWriter<W: Write> {
     wtr: csv_crate::Writer<W>,

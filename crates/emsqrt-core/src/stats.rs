@@ -3,8 +3,8 @@
 //! Tracks min, max, null_count, distinct_count, and total_count for columns.
 //! Used by the planner for better cost estimation and selectivity modeling.
 
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 use crate::types::Scalar;
 
@@ -38,7 +38,7 @@ impl ColumnStats {
     /// Update statistics with a new value.
     pub fn update(&mut self, value: &Scalar) {
         self.total_count += 1;
-        
+
         match value {
             Scalar::Null => {
                 self.null_count += 1;
@@ -55,7 +55,7 @@ impl ColumnStats {
                         self.min = Some(val.clone());
                     }
                 }
-                
+
                 // Update max
                 match &mut self.max {
                     Some(max) => {
@@ -117,7 +117,11 @@ impl ColumnStats {
     ///
     /// Returns a value between 0.0 and 1.0 representing the fraction of rows
     /// that would match the predicate.
-    pub fn estimate_range_selectivity(&self, min_val: Option<&Scalar>, max_val: Option<&Scalar>) -> f64 {
+    pub fn estimate_range_selectivity(
+        &self,
+        min_val: Option<&Scalar>,
+        max_val: Option<&Scalar>,
+    ) -> f64 {
         if self.non_null_count() == 0 {
             return 0.0;
         }
@@ -132,8 +136,9 @@ impl ColumnStats {
         match (min_val, max_val) {
             (Some(min), Some(max)) => {
                 // Range predicate: estimate based on overlap
-                if scalar_cmp(min, &self.max.as_ref().unwrap()).is_gt() ||
-                   scalar_cmp(max, &self.min.as_ref().unwrap()).is_lt() {
+                if scalar_cmp(min, &self.max.as_ref().unwrap()).is_gt()
+                    || scalar_cmp(max, &self.min.as_ref().unwrap()).is_lt()
+                {
                     return 0.0; // No overlap
                 }
                 // Simple estimate: assume uniform distribution
@@ -143,21 +148,20 @@ impl ColumnStats {
                 // value >= min (or value > min for strict inequality)
                 let col_min = self.min.as_ref().unwrap();
                 let col_max = self.max.as_ref().unwrap();
-                
+
                 if scalar_cmp(min, col_max).is_gt() {
                     return 0.0; // All values are below min
                 }
                 if scalar_cmp(min, col_min).is_le() {
                     return 1.0; // All values are above min
                 }
-                
+
                 // Estimate selectivity based on range: assume uniform distribution
                 // Fraction of range that passes: (col_max - min) / (col_max - col_min)
                 // This is approximate and assumes uniform distribution
-                if let (Some(min_val), Some(max_val)) = (
-                    scalar_to_f64(col_min),
-                    scalar_to_f64(col_max)
-                ) {
+                if let (Some(min_val), Some(max_val)) =
+                    (scalar_to_f64(col_min), scalar_to_f64(col_max))
+                {
                     if let Some(threshold) = scalar_to_f64(min) {
                         if max_val > min_val {
                             let selectivity = (max_val - threshold) / (max_val - min_val);
@@ -165,27 +169,26 @@ impl ColumnStats {
                         }
                     }
                 }
-                
+
                 0.5 // Fallback: conservative estimate
             }
             (None, Some(max)) => {
                 // value <= max (or value < max for strict inequality)
                 let col_min = self.min.as_ref().unwrap();
                 let col_max = self.max.as_ref().unwrap();
-                
+
                 if scalar_cmp(max, col_min).is_lt() {
                     return 0.0; // All values are above max
                 }
                 if scalar_cmp(max, col_max).is_ge() {
                     return 1.0; // All values are below max
                 }
-                
+
                 // Estimate selectivity based on range: assume uniform distribution
                 // Fraction of range that passes: (max - col_min) / (col_max - col_min)
-                if let (Some(min_val), Some(max_val)) = (
-                    scalar_to_f64(col_min),
-                    scalar_to_f64(col_max)
-                ) {
+                if let (Some(min_val), Some(max_val)) =
+                    (scalar_to_f64(col_min), scalar_to_f64(col_max))
+                {
                     if let Some(threshold) = scalar_to_f64(max) {
                         if max_val > min_val {
                             let selectivity = (threshold - min_val) / (max_val - min_val);
@@ -193,7 +196,7 @@ impl ColumnStats {
                         }
                     }
                 }
-                
+
                 0.5 // Fallback: conservative estimate
             }
             (None, None) => 1.0,
@@ -247,15 +250,19 @@ impl SchemaStats {
 
     /// Get or create statistics for a column.
     pub fn get_or_create(&mut self, column_name: String) -> &mut ColumnStats {
-        self.column_stats.entry(column_name).or_insert_with(ColumnStats::new)
+        self.column_stats
+            .entry(column_name)
+            .or_insert_with(ColumnStats::new)
     }
 
     /// Merge statistics from another SchemaStats into this one.
     pub fn merge(&self, other: &SchemaStats) -> SchemaStats {
         let mut merged = SchemaStats::new();
-        
+
         // Merge stats for all columns present in either schema
-        let mut all_columns: Vec<String> = self.column_stats.keys()
+        let mut all_columns: Vec<String> = self
+            .column_stats
+            .keys()
             .chain(other.column_stats.keys())
             .cloned()
             .collect();
@@ -263,7 +270,10 @@ impl SchemaStats {
         all_columns.dedup();
 
         for col_name in all_columns {
-            let stats = match (self.column_stats.get(&col_name), other.column_stats.get(&col_name)) {
+            let stats = match (
+                self.column_stats.get(&col_name),
+                other.column_stats.get(&col_name),
+            ) {
                 (Some(a), Some(b)) => a.merge(b),
                 (Some(a), None) => a.clone(),
                 (None, Some(b)) => b.clone(),
@@ -299,7 +309,7 @@ fn scalar_to_f64(s: &Scalar) -> Option<f64> {
 fn scalar_cmp(a: &Scalar, b: &Scalar) -> std::cmp::Ordering {
     use std::cmp::Ordering;
     use Scalar::*;
-    
+
     match (a, b) {
         (Null, Null) => Ordering::Equal,
         (Null, _) => Ordering::Less,
@@ -334,4 +344,3 @@ fn scalar_type_order(s: &Scalar) -> u8 {
         Bin(_) => 7,
     }
 }
-

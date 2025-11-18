@@ -93,7 +93,9 @@ impl Operator for MergeJoin {
                     .columns
                     .iter()
                     .position(|c| &c.name == right_col)
-                    .ok_or_else(|| OpError::Exec(format!("right join key '{}' not found", right_col)))
+                    .ok_or_else(|| {
+                        OpError::Exec(format!("right join key '{}' not found", right_col))
+                    })
             })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -136,12 +138,14 @@ fn merge_join_sorted(
     let right_rows = right.num_rows();
 
     if left_rows == 0 && right_rows == 0 {
-        return Ok(RowBatch { columns: Vec::new() });
+        return Ok(RowBatch {
+            columns: Vec::new(),
+        });
     }
 
     // Prepare output columns
     let mut output_cols = Vec::new();
-    
+
     // Initialize left columns
     for col in &left.columns {
         output_cols.push(emsqrt_core::types::Column {
@@ -189,7 +193,13 @@ fn merge_join_sorted(
                     JoinType::Right | JoinType::Full => {
                         // Emit right row with nulls for left
                         emit_nulls(&mut output_cols, 0, left.columns.len());
-                        emit_row(right, right_idx, &mut output_cols, left.columns.len(), right.columns.len());
+                        emit_row(
+                            right,
+                            right_idx,
+                            &mut output_cols,
+                            left.columns.len(),
+                            right.columns.len(),
+                        );
                     }
                     _ => {}
                 }
@@ -222,7 +232,13 @@ fn merge_join_sorted(
                 for l in left_idx..left_match_end {
                     for r in right_idx..right_match_end {
                         emit_row(left, l, &mut output_cols, 0, left.columns.len());
-                        emit_row(right, r, &mut output_cols, left.columns.len(), right.columns.len());
+                        emit_row(
+                            right,
+                            r,
+                            &mut output_cols,
+                            left.columns.len(),
+                            right.columns.len(),
+                        );
                     }
                 }
 
@@ -249,7 +265,13 @@ fn merge_join_sorted(
         match join_type {
             JoinType::Right | JoinType::Full => {
                 emit_nulls(&mut output_cols, 0, left.columns.len());
-                emit_row(right, right_idx, &mut output_cols, left.columns.len(), right.columns.len());
+                emit_row(
+                    right,
+                    right_idx,
+                    &mut output_cols,
+                    left.columns.len(),
+                    right.columns.len(),
+                );
             }
             _ => {}
         }
@@ -270,10 +292,16 @@ fn extract_join_key(
     let mut key = Vec::with_capacity(key_indices.len());
     for &col_idx in key_indices {
         if col_idx >= batch.columns.len() {
-            return Err(OpError::Exec(format!("column index {} out of bounds", col_idx)));
+            return Err(OpError::Exec(format!(
+                "column index {} out of bounds",
+                col_idx
+            )));
         }
         if row_idx >= batch.columns[col_idx].values.len() {
-            return Err(OpError::Exec(format!("row index {} out of bounds", row_idx)));
+            return Err(OpError::Exec(format!(
+                "row index {} out of bounds",
+                row_idx
+            )));
         }
         key.push(batch.columns[col_idx].values[row_idx].clone());
     }
@@ -283,7 +311,7 @@ fn extract_join_key(
 /// Compare two scalar tuples for ordering.
 fn compare_scalar_tuples(a: &[Scalar], b: &[Scalar]) -> Ordering {
     use emsqrt_core::types::Scalar::*;
-    
+
     for (x, y) in a.iter().zip(b.iter()) {
         match (x, y) {
             (Null, Null) => continue,
@@ -375,11 +403,7 @@ fn emit_row(
 }
 
 /// Emit null values for a range of columns.
-fn emit_nulls(
-    output_cols: &mut [emsqrt_core::types::Column],
-    start_col: usize,
-    num_cols: usize,
-) {
+fn emit_nulls(output_cols: &mut [emsqrt_core::types::Column], start_col: usize, num_cols: usize) {
     for i in 0..num_cols {
         if start_col + i < output_cols.len() {
             output_cols[start_col + i].values.push(Scalar::Null);

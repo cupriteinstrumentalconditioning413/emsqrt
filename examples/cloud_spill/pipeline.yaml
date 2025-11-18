@@ -1,0 +1,18 @@
+config:
+  spill_uri: "s3://my-bucket/emsqrt-spill"
+  spill_aws_region: "us-east-1"
+  spill_retry_max_ms: 5000
+steps:
+  - op: scan
+    source: "data/events.csv"
+    schema:
+      - name: "ts"
+        type: "Int64"
+        nullable: false
+      - name: "event"
+        type: "Utf8"
+        nullable: false
+  - op: sink
+    destination: "s3://my-bucket/emsqrt-output/events.csv"
+    format: "csv"
+

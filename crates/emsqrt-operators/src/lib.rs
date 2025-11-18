@@ -18,6 +18,7 @@ pub mod project;
 
 pub mod join;
 pub mod sort;
+pub mod window;
 
 pub use plan::{Footprint, OpPlan};
 pub use traits::{BlockStream, OpError, Operator};

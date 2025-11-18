@@ -45,11 +45,10 @@ impl ParquetReader {
         projection: Option<Vec<String>>,
         batch_size: usize,
     ) -> Result<Self> {
-        let file = File::open(path)
-            .map_err(|e| Error::Io(e))?;
+        let file = File::open(path).map_err(|e| Error::Io(e))?;
 
-        let builder = ParquetRecordBatchReaderBuilder::try_new(file)
-            .map_err(|e| Error::Parquet(e))?;
+        let builder =
+            ParquetRecordBatchReaderBuilder::try_new(file).map_err(|e| Error::Parquet(e))?;
 
         // Get schema and metadata before building (needed for projection)
         let schema_ref = builder.schema().clone();
@@ -59,18 +58,23 @@ impl ParquetReader {
 
         // Calculate projection indices if needed (before moving builder)
         let projection_indices = if let Some(ref projection_cols) = projection {
-            Some(projection_cols
-                .iter()
-                .map(|col_name| {
-                    arrow_schema
-                        .fields()
-                        .iter()
-                        .position(|f| f.name() == col_name)
-                        .ok_or_else(|| {
-                            Error::Other(format!("Column '{}' not found in Parquet schema", col_name))
-                        })
-                })
-                .collect::<std::result::Result<Vec<usize>, Error>>()?)
+            Some(
+                projection_cols
+                    .iter()
+                    .map(|col_name| {
+                        arrow_schema
+                            .fields()
+                            .iter()
+                            .position(|f| f.name() == col_name)
+                            .ok_or_else(|| {
+                                Error::Other(format!(
+                                    "Column '{}' not found in Parquet schema",
+                                    col_name
+                                ))
+                            })
+                    })
+                    .collect::<std::result::Result<Vec<usize>, Error>>()?,
+            )
         } else {
             None
         };
@@ -87,12 +91,10 @@ impl ParquetReader {
         // Set batch size
         builder = builder.with_batch_size(batch_size);
 
-        let reader = builder
-            .build()
-            .map_err(|e| {
-                // build() returns ArrowError, convert to string error
-                Error::Other(format!("Failed to build Parquet reader: {}", e))
-            })?;
+        let reader = builder.build().map_err(|e| {
+            // build() returns ArrowError, convert to string error
+            Error::Other(format!("Failed to build Parquet reader: {}", e))
+        })?;
 
         // Get projected schema - if projection was applied, extract the projected schema
         let final_schema = if let Some(ref indices) = projection_indices {
@@ -112,7 +114,6 @@ impl ParquetReader {
             batch_size,
         })
     }
-
 
     /// Read the next batch of rows as a RecordBatch (low-level Arrow API).
     ///

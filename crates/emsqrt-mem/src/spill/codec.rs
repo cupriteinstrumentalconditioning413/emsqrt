@@ -11,7 +11,7 @@ use crate::error::{Error, Result};
 pub enum Codec {
     None = 0,
     Zstd = 1,
-    Lz4  = 2,
+    Lz4 = 2,
 }
 
 impl Codec {

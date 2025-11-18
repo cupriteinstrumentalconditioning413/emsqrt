@@ -16,7 +16,7 @@ use test_data_gen::create_temp_spill_dir;
 fn setup_test_csv(path: &str, rows: usize) {
     let mut file = fs::File::create(path).expect("Failed to create test file");
     writeln!(file, "id,name,age,email").expect("Failed to write header");
-    
+
     for i in 0..rows {
         writeln!(
             file,
@@ -39,10 +39,10 @@ fn test_scan_filter_project_sink() {
     let temp_dir = create_temp_spill_dir();
     let input_file = format!("{}/input.csv", temp_dir);
     let output_file = format!("{}/output.csv", temp_dir);
-    
+
     fs::create_dir_all(&temp_dir).expect("Failed to create temp dir");
     setup_test_csv(&input_file, 1000);
-    
+
     // Build pipeline: scan → filter (age > 25) → project (name, email) → sink
     let schema = Schema::new(vec![
         Field::new("id", DataType::Int64, false),
@@ -50,65 +50,69 @@ fn test_scan_filter_project_sink() {
         Field::new("age", DataType::Int64, false),
         Field::new("email", DataType::Utf8, false),
     ]);
-    
+
     let scan = L::Scan {
         source: format!("file://{}", input_file),
         schema: schema.clone(),
     };
-    
+
     let filter = L::Filter {
         input: Box::new(scan),
         expr: "age > 25".to_string(),
     };
-    
+
     let project = L::Project {
         input: Box::new(filter),
         columns: vec!["name".to_string(), "email".to_string()],
     };
-    
+
     let sink = L::Sink {
         input: Box::new(project),
         destination: format!("file://{}", output_file),
         format: "csv".to_string(),
     };
-    
+
     // Optimize and lower
     let optimized = rules::optimize(sink);
     let phys_prog = lower_to_physical(&optimized);
     let work = estimate_work(&optimized, None);
     let te = plan_te(&phys_prog.plan, &work, 64 * 1024 * 1024).expect("TE planning failed");
-    
+
     // Execute
     let mut config = EngineConfig::default();
     config.spill_dir = temp_dir.clone();
-    let mut engine = Engine::new(config);
+    let mut engine = Engine::new(config).expect("engine init");
     let manifest = engine.run(&phys_prog, &te).expect("Execution failed");
-    
+
     // Verify execution completed
     assert!(manifest.started_ms <= manifest.finished_ms);
-    
+
     // Verify output file exists and has data
     assert!(
         fs::metadata(&output_file).is_ok(),
         "Output file should exist"
     );
-    
+
     let output_content = fs::read_to_string(&output_file).expect("Failed to read output");
     let output_lines: Vec<&str> = output_content.lines().collect();
-    
+
     // Should have header + filtered rows
     assert!(
         output_lines.len() > 1,
         "Output should have header and data (got {} lines, content: {:?})",
         output_lines.len(),
-        if output_lines.len() > 0 { output_lines[0] } else { "" }
+        if output_lines.len() > 0 {
+            output_lines[0]
+        } else {
+            ""
+        }
     );
-    
+
     // Count how many rows should pass the filter (age > 25)
     // ages cycle from 20 to 69 (20 + i%50), so ages > 25 are 26-69 = 44 out of every 50
     let remainder: usize = 1000 % 50;
     let expected_passing: usize = (1000 / 50) * 44 + remainder.saturating_sub(6);
-    
+
     // Allow some tolerance due to header line
     let actual_data_rows = output_lines.len() - 1; // Subtract header
     assert!(
@@ -117,7 +121,7 @@ fn test_scan_filter_project_sink() {
         expected_passing,
         actual_data_rows
     );
-    
+
     // Cleanup
     cleanup_test_file(&input_file);
     cleanup_test_file(&output_file);
@@ -128,13 +132,13 @@ fn test_scan_filter_project_sink() {
 fn test_sort_aggregate_pipeline() {
     let temp_dir = create_temp_spill_dir();
     let input_file = format!("{}/categories.csv", temp_dir);
-    
+
     fs::create_dir_all(&temp_dir).expect("Failed to create temp dir");
-    
+
     // Create test data with categories
     let mut file = fs::File::create(&input_file).expect("Failed to create file");
     writeln!(file, "category,amount").expect("Failed to write header");
-    
+
     let num_categories = 10;
     for i in 0..100 {
         let category = format!("cat_{}", i % num_categories);
@@ -142,45 +146,45 @@ fn test_sort_aggregate_pipeline() {
         writeln!(file, "{},{}", category, amount).expect("Failed to write row");
     }
     drop(file);
-    
+
     // Build pipeline: scan → aggregate (count by category)
     let schema = Schema::new(vec![
         Field::new("category", DataType::Utf8, false),
         Field::new("amount", DataType::Int64, false),
     ]);
-    
+
     let scan = L::Scan {
         source: format!("file://{}", input_file),
         schema,
     };
-    
+
     let aggregate = L::Aggregate {
         input: Box::new(scan),
         group_by: vec!["category".to_string()],
         aggs: vec![Aggregation::Count],
     };
-    
+
     let output_file = format!("{}/result.csv", temp_dir);
     let sink = L::Sink {
         input: Box::new(aggregate),
         destination: format!("file://{}", output_file),
         format: "csv".to_string(),
     };
-    
+
     // Execute
     let optimized = rules::optimize(sink);
     let phys_prog = lower_to_physical(&optimized);
     let work = estimate_work(&optimized, None);
     let te = plan_te(&phys_prog.plan, &work, 32 * 1024 * 1024).expect("TE planning failed");
-    
+
     let mut config = EngineConfig::default();
     config.spill_dir = temp_dir.clone();
-    let mut engine = Engine::new(config);
+    let mut engine = Engine::new(config).expect("engine init");
     let manifest = engine.run(&phys_prog, &te).expect("Execution failed");
-    
+
     // Verify execution
     assert!(manifest.started_ms <= manifest.finished_ms);
-    
+
     // Cleanup
     cleanup_test_file(&input_file);
     let _ = fs::remove_dir_all(&temp_dir);
@@ -190,13 +194,13 @@ fn test_sort_aggregate_pipeline() {
 fn test_simple_map_pipeline() {
     let temp_dir = create_temp_spill_dir();
     fs::create_dir_all(&temp_dir).expect("Failed to create temp dir");
-    
+
     // Build a simple in-memory pipeline: scan (memory) → map → sink (memory)
     let schema = Schema::new(vec![
         Field::new("old_name", DataType::Utf8, false),
         Field::new("value", DataType::Int64, false),
     ]);
-    
+
     // Create test data
     let test_batch = RowBatch {
         columns: vec![
@@ -213,11 +217,11 @@ fn test_simple_map_pipeline() {
             },
         ],
     };
-    
+
     // Write test data to file first
     let input_file = format!("{}/input.csv", temp_dir);
     let output_file = format!("{}/output.csv", temp_dir);
-    
+
     // Helper to format Scalar for CSV
     fn scalar_to_string(v: &emsqrt_core::types::Scalar) -> String {
         use emsqrt_core::types::Scalar::*;
@@ -232,47 +236,53 @@ fn test_simple_map_pipeline() {
             Bin(b) => format!("[binary {} bytes]", b.len()),
         }
     }
-    
+
     // Write CSV header
     let mut file = fs::File::create(&input_file).expect("Failed to create input file");
     writeln!(file, "old_name,value").expect("Failed to write header");
     for (i, old_col) in test_batch.columns[0].values.iter().enumerate() {
         let value = &test_batch.columns[1].values[i];
-        writeln!(file, "{},{}", scalar_to_string(old_col), scalar_to_string(value)).expect("Failed to write row");
+        writeln!(
+            file,
+            "{},{}",
+            scalar_to_string(old_col),
+            scalar_to_string(value)
+        )
+        .expect("Failed to write row");
     }
     drop(file);
-    
+
     let scan = L::Scan {
         source: format!("file://{}", input_file),
         schema: schema.clone(),
     };
-    
+
     let map = L::Map {
         input: Box::new(scan),
         expr: "old_name AS new_name".to_string(),
     };
-    
+
     let sink = L::Sink {
         input: Box::new(map),
         destination: format!("file://{}", output_file),
         format: "csv".to_string(),
     };
-    
+
     // Execute
     let optimized = rules::optimize(sink);
     let phys_prog = lower_to_physical(&optimized);
     let work = estimate_work(&optimized, None);
     let te = plan_te(&phys_prog.plan, &work, 16 * 1024 * 1024).expect("TE planning failed");
-    
+
     let mut config = EngineConfig::default();
     config.spill_dir = temp_dir.clone();
-    let mut engine = Engine::new(config);
-    
+    let mut engine = Engine::new(config).expect("engine init");
+
     let manifest = engine.run(&phys_prog, &te).expect("Execution failed");
-    
+
     // Verify execution completed
     assert!(manifest.started_ms <= manifest.finished_ms);
-    
+
     let _ = fs::remove_dir_all(&temp_dir);
 }
 
@@ -280,7 +290,7 @@ fn test_simple_map_pipeline() {
 fn test_project_column_selection() {
     let temp_dir = create_temp_spill_dir();
     fs::create_dir_all(&temp_dir).expect("Failed to create temp dir");
-    
+
     // Create a schema with many columns, project only a subset
     let schema = Schema::new(vec![
         Field::new("col1", DataType::Int64, false),
@@ -289,7 +299,7 @@ fn test_project_column_selection() {
         Field::new("col4", DataType::Int32, false),
         Field::new("col5", DataType::Utf8, false),
     ]);
-    
+
     // Create test data
     let test_batch = RowBatch {
         columns: vec![
@@ -315,11 +325,11 @@ fn test_project_column_selection() {
             },
         ],
     };
-    
+
     // Write test data to file first
     let input_file = format!("{}/wide_table.csv", temp_dir);
     let output_file = format!("{}/narrow_table.csv", temp_dir);
-    
+
     // Helper to format Scalar for CSV
     fn scalar_to_string(v: &emsqrt_core::types::Scalar) -> String {
         use emsqrt_core::types::Scalar::*;
@@ -334,52 +344,54 @@ fn test_project_column_selection() {
             Bin(b) => format!("[binary {} bytes]", b.len()),
         }
     }
-    
+
     // Write CSV header
     let mut file = fs::File::create(&input_file).expect("Failed to create input file");
     let headers: Vec<&str> = test_batch.columns.iter().map(|c| c.name.as_str()).collect();
     writeln!(file, "{}", headers.join(",")).expect("Failed to write header");
-    
+
     // Write rows
     let num_rows = test_batch.num_rows();
     for i in 0..num_rows {
-        let row: Vec<String> = test_batch.columns.iter()
+        let row: Vec<String> = test_batch
+            .columns
+            .iter()
             .map(|col| scalar_to_string(&col.values[i]))
             .collect();
         writeln!(file, "{}", row.join(",")).expect("Failed to write row");
     }
     drop(file);
-    
+
     let scan = L::Scan {
         source: format!("file://{}", input_file),
         schema: schema.clone(),
     };
-    
+
     let project = L::Project {
         input: Box::new(scan),
         columns: vec!["col1".to_string(), "col3".to_string()],
     };
-    
+
     let sink = L::Sink {
         input: Box::new(project),
         destination: format!("file://{}", output_file),
         format: "csv".to_string(),
     };
-    
+
     // Execute
     let optimized = rules::optimize(sink);
     let phys_prog = lower_to_physical(&optimized);
     let work = estimate_work(&optimized, None);
     let te = plan_te(&phys_prog.plan, &work, 16 * 1024 * 1024).expect("TE planning failed");
-    
+
     let mut config = EngineConfig::default();
     config.spill_dir = temp_dir.clone();
-    let mut engine = Engine::new(config);
-    
+    let mut engine = Engine::new(config).expect("engine init");
+
     let manifest = engine.run(&phys_prog, &te).expect("Execution failed");
-    
+
     assert!(manifest.started_ms <= manifest.finished_ms);
-    
+
     let _ = fs::remove_dir_all(&temp_dir);
 }
 
@@ -387,9 +399,9 @@ fn test_project_column_selection() {
 fn test_multiple_filters() {
     let temp_dir = create_temp_spill_dir();
     let input_file = format!("{}/multi_filter.csv", temp_dir);
-    
+
     fs::create_dir_all(&temp_dir).expect("Failed to create temp dir");
-    
+
     // Create test data
     let mut file = fs::File::create(&input_file).expect("Failed to create file");
     writeln!(file, "score,status").expect("Failed to write header");
@@ -399,61 +411,60 @@ fn test_multiple_filters() {
         writeln!(file, "{},{}", score, status).expect("Failed to write row");
     }
     drop(file);
-    
+
     let schema = Schema::new(vec![
         Field::new("score", DataType::Int64, false),
         Field::new("status", DataType::Utf8, false),
     ]);
-    
+
     let scan = L::Scan {
         source: format!("file://{}", input_file),
         schema,
     };
-    
+
     // Filter 1: score > 50
     let filter1 = L::Filter {
         input: Box::new(scan),
         expr: "score > 50".to_string(),
     };
-    
+
     // Note: For now we only support one filter at a time in the simple predicate evaluator
     // This test just verifies the single filter works
-    
+
     let sink = L::Sink {
         input: Box::new(filter1),
         destination: format!("file://{}/filtered.csv", temp_dir),
         format: "csv".to_string(),
     };
-    
+
     let optimized = rules::optimize(sink);
     let phys_prog = lower_to_physical(&optimized);
     let work = estimate_work(&optimized, None);
     let te = plan_te(&phys_prog.plan, &work, 16 * 1024 * 1024).expect("TE planning failed");
-    
+
     let mut config = EngineConfig::default();
     config.spill_dir = temp_dir.clone();
-    let mut engine = Engine::new(config);
+    let mut engine = Engine::new(config).expect("engine init");
     let manifest = engine.run(&phys_prog, &te).expect("Execution failed");
-    
+
     assert!(manifest.started_ms <= manifest.finished_ms);
-    
+
     cleanup_test_file(&input_file);
     let _ = fs::remove_dir_all(&temp_dir);
 }
-
 
 #[cfg(feature = "parquet")]
 #[test]
 fn test_parquet_scan_filter_project_sink() {
     use emsqrt_io::readers::parquet::ParquetReader;
     use emsqrt_io::writers::parquet::ParquetWriter;
-    
+
     let temp_dir = create_temp_spill_dir();
     let input_file = format!("{}/input.parquet", temp_dir);
     let output_file = format!("{}/output.parquet", temp_dir);
-    
+
     fs::create_dir_all(&temp_dir).expect("Failed to create temp dir");
-    
+
     // Create input Parquet file
     let input_schema = Schema::new(vec![
         Field::new("id", DataType::Int64, false),
@@ -461,7 +472,7 @@ fn test_parquet_scan_filter_project_sink() {
         Field::new("age", DataType::Int64, false),
         Field::new("email", DataType::Utf8, false),
     ]);
-    
+
     let input_data = RowBatch {
         columns: vec![
             Column {
@@ -470,7 +481,9 @@ fn test_parquet_scan_filter_project_sink() {
             },
             Column {
                 name: "name".to_string(),
-                values: (0..100).map(|i| Scalar::Str(format!("Person{}", i))).collect(),
+                values: (0..100)
+                    .map(|i| Scalar::Str(format!("Person{}", i)))
+                    .collect(),
             },
             Column {
                 name: "age".to_string(),
@@ -478,18 +491,22 @@ fn test_parquet_scan_filter_project_sink() {
             },
             Column {
                 name: "email".to_string(),
-                values: (0..100).map(|i| Scalar::Str(format!("person{}@test.com", i))).collect(),
+                values: (0..100)
+                    .map(|i| Scalar::Str(format!("person{}@test.com", i)))
+                    .collect(),
             },
         ],
     };
-    
+
     {
         let mut writer = ParquetWriter::from_emsqrt_schema(&input_file, &input_schema)
             .expect("Failed to create Parquet writer");
-        writer.write_row_batch(&input_data).expect("Failed to write");
+        writer
+            .write_row_batch(&input_data)
+            .expect("Failed to write");
         writer.close().expect("Failed to close");
     }
-    
+
     // Build pipeline: scan (Parquet) → filter (age > 25) → project (name, email) → sink (Parquet)
     let schema = Schema::new(vec![
         Field::new("id", DataType::Int64, false),
@@ -497,47 +514,47 @@ fn test_parquet_scan_filter_project_sink() {
         Field::new("age", DataType::Int64, false),
         Field::new("email", DataType::Utf8, false),
     ]);
-    
+
     let scan = L::Scan {
         source: input_file.clone(),
         schema: schema.clone(),
     };
-    
+
     let filter = L::Filter {
         input: Box::new(scan),
         expr: "age > 25".to_string(),
     };
-    
+
     let project = L::Project {
         input: Box::new(filter),
         columns: vec!["name".to_string(), "email".to_string()],
     };
-    
+
     let sink = L::Sink {
         input: Box::new(project),
         destination: output_file.clone(),
         format: "parquet".to_string(),
     };
-    
+
     let optimized = rules::optimize(sink);
     let phys_prog = lower_to_physical(&optimized);
     let work = estimate_work(&optimized, None);
     let te = plan_te(&phys_prog.plan, &work, 16 * 1024 * 1024).expect("TE planning failed");
-    
+
     let mut config = EngineConfig::default();
     config.spill_dir = temp_dir.clone();
-    let mut engine = Engine::new(config);
+    let mut engine = Engine::new(config).expect("engine init");
     let manifest = engine.run(&phys_prog, &te).expect("Execution failed");
-    
+
     assert!(manifest.started_ms <= manifest.finished_ms);
-    
+
     // Verify output Parquet file was created
     assert!(fs::metadata(&output_file).is_ok());
-    
+
     // Read and verify output
     let mut reader = ParquetReader::from_path(&output_file, None, 1000)
         .expect("Failed to create Parquet reader");
-    
+
     let mut total_rows = 0;
     while let Some(batch) = reader.next_batch().expect("Failed to read") {
         assert_eq!(batch.columns.len(), 2); // name, email
@@ -545,10 +562,10 @@ fn test_parquet_scan_filter_project_sink() {
         assert_eq!(batch.columns[1].name, "email");
         total_rows += batch.num_rows();
     }
-    
+
     // Should have some rows (age > 25)
     assert!(total_rows > 0);
-    
+
     let _ = fs::remove_dir_all(&temp_dir);
 }
 
@@ -556,14 +573,14 @@ fn test_parquet_scan_filter_project_sink() {
 #[test]
 fn test_csv_to_parquet_conversion() {
     use emsqrt_io::readers::parquet::ParquetReader;
-    
+
     let temp_dir = create_temp_spill_dir();
     let input_file = format!("{}/input.csv", temp_dir);
     let output_file = format!("{}/output.parquet", temp_dir);
-    
+
     fs::create_dir_all(&temp_dir).expect("Failed to create temp dir");
     setup_test_csv(&input_file, 100);
-    
+
     // Build pipeline: scan (CSV) → filter → sink (Parquet)
     let schema = Schema::new(vec![
         Field::new("id", DataType::Int64, false),
@@ -571,50 +588,50 @@ fn test_csv_to_parquet_conversion() {
         Field::new("age", DataType::Int64, false),
         Field::new("email", DataType::Utf8, false),
     ]);
-    
+
     let scan = L::Scan {
         source: input_file.clone(),
         schema: schema.clone(),
     };
-    
+
     let filter = L::Filter {
         input: Box::new(scan),
         expr: "age > 30".to_string(),
     };
-    
+
     let sink = L::Sink {
         input: Box::new(filter),
         destination: output_file.clone(),
         format: "parquet".to_string(),
     };
-    
+
     let optimized = rules::optimize(sink);
     let phys_prog = lower_to_physical(&optimized);
     let work = estimate_work(&optimized, None);
     let te = plan_te(&phys_prog.plan, &work, 16 * 1024 * 1024).expect("TE planning failed");
-    
+
     let mut config = EngineConfig::default();
     config.spill_dir = temp_dir.clone();
-    let mut engine = Engine::new(config);
+    let mut engine = Engine::new(config).expect("engine init");
     let manifest = engine.run(&phys_prog, &te).expect("Execution failed");
-    
+
     assert!(manifest.started_ms <= manifest.finished_ms);
-    
+
     // Verify Parquet file was created
     assert!(fs::metadata(&output_file).is_ok());
-    
+
     // Read Parquet file and verify data
     let mut reader = ParquetReader::from_path(&output_file, None, 1000)
         .expect("Failed to create Parquet reader");
-    
+
     let mut total_rows = 0;
     while let Some(batch) = reader.next_batch().expect("Failed to read") {
         assert_eq!(batch.columns.len(), 4); // id, name, age, email
         total_rows += batch.num_rows();
     }
-    
+
     assert!(total_rows > 0);
-    
+
     cleanup_test_file(&input_file);
     let _ = fs::remove_dir_all(&temp_dir);
 }

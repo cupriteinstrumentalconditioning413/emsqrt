@@ -57,27 +57,35 @@ impl OpError {
         match self {
             OpError::Schema(msg) => {
                 if msg.contains("unknown column") || msg.contains("column") {
-                    vec!["Check that the column name is spelled correctly".into(),
-                         "Verify the column exists in the input schema".into(),
-                         "Use 'AS' to rename columns if needed".into()]
+                    vec![
+                        "Check that the column name is spelled correctly".into(),
+                        "Verify the column exists in the input schema".into(),
+                        "Use 'AS' to rename columns if needed".into(),
+                    ]
                 } else {
                     vec![]
                 }
             }
             OpError::Exec(msg) => {
                 if msg.contains("parse") || msg.contains("expression") {
-                    vec!["Check expression syntax".into(),
-                         "Verify column names and literal values".into()]
+                    vec![
+                        "Check expression syntax".into(),
+                        "Verify column names and literal values".into(),
+                    ]
                 } else if msg.contains("memory") || msg.contains("budget") {
-                    vec!["Try increasing memory cap".into(),
-                         "Consider using external sort or hash join".into()]
+                    vec![
+                        "Try increasing memory cap".into(),
+                        "Consider using external sort or hash join".into(),
+                    ]
                 } else {
                     vec![]
                 }
             }
-            OpError::Recoverable(msg) => {
-                vec!["This error may be transient - retrying may help".into(),
-                     "Check network connectivity if using remote storage".into()]
+            OpError::Recoverable(_msg) => {
+                vec![
+                    "This error may be transient - retrying may help".into(),
+                    "Check network connectivity if using remote storage".into(),
+                ]
             }
             _ => vec![],
         }

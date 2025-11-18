@@ -5,11 +5,13 @@
 
 #[cfg(feature = "parquet")]
 use arrow_array::{
-    Array, ArrayRef, BooleanArray, Float32Array, Float64Array, Int32Array, Int64Array,
-    StringArray, BinaryArray, RecordBatch,
+    Array, ArrayRef, BinaryArray, BooleanArray, Float32Array, Float64Array, Int32Array, Int64Array,
+    RecordBatch, StringArray,
 };
 #[cfg(feature = "parquet")]
-use arrow_schema::{DataType as ArrowDataType, Field as ArrowField, Schema as ArrowSchema, SchemaRef};
+use arrow_schema::{
+    DataType as ArrowDataType, Field as ArrowField, Schema as ArrowSchema, SchemaRef,
+};
 #[cfg(feature = "parquet")]
 use std::sync::Arc;
 
@@ -24,7 +26,7 @@ use crate::error::{Error, Result};
 pub fn record_batch_to_row_batch(batch: &RecordBatch) -> Result<RowBatch> {
     let schema = batch.schema();
     let num_rows = batch.num_rows();
-    
+
     if num_rows == 0 {
         // Empty batch - create columns with correct names but no values
         let columns: Vec<Column> = schema
@@ -37,13 +39,13 @@ pub fn record_batch_to_row_batch(batch: &RecordBatch) -> Result<RowBatch> {
             .collect();
         return Ok(RowBatch { columns });
     }
-    
+
     let mut columns = Vec::with_capacity(schema.fields().len());
-    
+
     for (col_idx, field) in schema.fields().iter().enumerate() {
         let array = batch.column(col_idx);
         let mut values = Vec::with_capacity(num_rows);
-        
+
         // Convert each row's value based on Arrow array type
         for row_idx in 0..num_rows {
             if array.is_null(row_idx) {
@@ -53,13 +55,13 @@ pub fn record_batch_to_row_batch(batch: &RecordBatch) -> Result<RowBatch> {
                 values.push(scalar);
             }
         }
-        
+
         columns.push(Column {
             name: field.name().clone(),
             values,
         });
     }
-    
+
     Ok(RowBatch { columns })
 }
 
@@ -67,18 +69,15 @@ pub fn record_batch_to_row_batch(batch: &RecordBatch) -> Result<RowBatch> {
 ///
 /// Requires an Arrow schema to match the RowBatch structure.
 /// The schema should match the RowBatch's column names and types.
-pub fn row_batch_to_record_batch(
-    batch: &RowBatch,
-    schema: SchemaRef,
-) -> Result<RecordBatch> {
+pub fn row_batch_to_record_batch(batch: &RowBatch, schema: SchemaRef) -> Result<RecordBatch> {
     if batch.columns.is_empty() {
         // Empty batch - create empty RecordBatch with schema
         return Ok(RecordBatch::new_empty(schema));
     }
-    
+
     let _num_rows = batch.num_rows();
     let mut arrays = Vec::with_capacity(batch.columns.len());
-    
+
     for (col_idx, column) in batch.columns.iter().enumerate() {
         let field = schema.fields().get(col_idx).ok_or_else(|| {
             Error::Schema(format!(
@@ -88,7 +87,7 @@ pub fn row_batch_to_record_batch(
                 col_idx
             ))
         })?;
-        
+
         // Verify column name matches
         if field.name() != &column.name {
             return Err(Error::Schema(format!(
@@ -98,12 +97,13 @@ pub fn row_batch_to_record_batch(
                 column.name
             )));
         }
-        
+
         // Convert column values to Arrow array
-        let array = scalar_column_to_arrow_array(&column.values, field.data_type(), field.is_nullable())?;
+        let array =
+            scalar_column_to_arrow_array(&column.values, field.data_type(), field.is_nullable())?;
         arrays.push(array);
     }
-    
+
     RecordBatch::try_new(schema, arrays)
         .map_err(|e| Error::Other(format!("Failed to create RecordBatch: {}", e)))
 }
@@ -112,45 +112,52 @@ pub fn row_batch_to_record_batch(
 fn arrow_value_to_scalar(array: &ArrayRef, row_idx: usize) -> Result<Scalar> {
     match array.data_type() {
         ArrowDataType::Boolean => {
-            let arr = array.as_any().downcast_ref::<BooleanArray>().ok_or_else(|| {
-                Error::Other("Failed to cast to BooleanArray".to_string())
-            })?;
+            let arr = array
+                .as_any()
+                .downcast_ref::<BooleanArray>()
+                .ok_or_else(|| Error::Other("Failed to cast to BooleanArray".to_string()))?;
             Ok(Scalar::Bool(arr.value(row_idx)))
         }
         ArrowDataType::Int32 => {
-            let arr = array.as_any().downcast_ref::<Int32Array>().ok_or_else(|| {
-                Error::Other("Failed to cast to Int32Array".to_string())
-            })?;
+            let arr = array
+                .as_any()
+                .downcast_ref::<Int32Array>()
+                .ok_or_else(|| Error::Other("Failed to cast to Int32Array".to_string()))?;
             Ok(Scalar::I32(arr.value(row_idx)))
         }
         ArrowDataType::Int64 => {
-            let arr = array.as_any().downcast_ref::<Int64Array>().ok_or_else(|| {
-                Error::Other("Failed to cast to Int64Array".to_string())
-            })?;
+            let arr = array
+                .as_any()
+                .downcast_ref::<Int64Array>()
+                .ok_or_else(|| Error::Other("Failed to cast to Int64Array".to_string()))?;
             Ok(Scalar::I64(arr.value(row_idx)))
         }
         ArrowDataType::Float32 => {
-            let arr = array.as_any().downcast_ref::<Float32Array>().ok_or_else(|| {
-                Error::Other("Failed to cast to Float32Array".to_string())
-            })?;
+            let arr = array
+                .as_any()
+                .downcast_ref::<Float32Array>()
+                .ok_or_else(|| Error::Other("Failed to cast to Float32Array".to_string()))?;
             Ok(Scalar::F32(arr.value(row_idx)))
         }
         ArrowDataType::Float64 => {
-            let arr = array.as_any().downcast_ref::<Float64Array>().ok_or_else(|| {
-                Error::Other("Failed to cast to Float64Array".to_string())
-            })?;
+            let arr = array
+                .as_any()
+                .downcast_ref::<Float64Array>()
+                .ok_or_else(|| Error::Other("Failed to cast to Float64Array".to_string()))?;
             Ok(Scalar::F64(arr.value(row_idx)))
         }
         ArrowDataType::Utf8 | ArrowDataType::LargeUtf8 => {
-            let arr = array.as_any().downcast_ref::<StringArray>().ok_or_else(|| {
-                Error::Other("Failed to cast to StringArray".to_string())
-            })?;
+            let arr = array
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .ok_or_else(|| Error::Other("Failed to cast to StringArray".to_string()))?;
             Ok(Scalar::Str(arr.value(row_idx).to_string()))
         }
         ArrowDataType::Binary | ArrowDataType::LargeBinary => {
-            let arr = array.as_any().downcast_ref::<BinaryArray>().ok_or_else(|| {
-                Error::Other("Failed to cast to BinaryArray".to_string())
-            })?;
+            let arr = array
+                .as_any()
+                .downcast_ref::<BinaryArray>()
+                .ok_or_else(|| Error::Other("Failed to cast to BinaryArray".to_string()))?;
             Ok(Scalar::Bin(arr.value(row_idx).to_vec()))
         }
         _ => Err(Error::Other(format!(
@@ -175,14 +182,18 @@ fn scalar_column_to_arrow_array(
                         if nullable {
                             builder.append_null();
                         } else {
-                            return Err(Error::Schema("Null value in non-nullable Boolean column".to_string()));
+                            return Err(Error::Schema(
+                                "Null value in non-nullable Boolean column".to_string(),
+                            ));
                         }
                     }
                     Scalar::Bool(b) => builder.append_value(*b),
-                    _ => return Err(Error::Schema(format!(
-                        "Type mismatch: expected Boolean, got {:?}",
-                        val
-                    ))),
+                    _ => {
+                        return Err(Error::Schema(format!(
+                            "Type mismatch: expected Boolean, got {:?}",
+                            val
+                        )))
+                    }
                 }
             }
             Ok(Arc::new(builder.finish()))
@@ -195,7 +206,9 @@ fn scalar_column_to_arrow_array(
                         if nullable {
                             builder.append_null();
                         } else {
-                            return Err(Error::Schema("Null value in non-nullable Int32 column".to_string()));
+                            return Err(Error::Schema(
+                                "Null value in non-nullable Int32 column".to_string(),
+                            ));
                         }
                     }
                     Scalar::I32(i) => builder.append_value(*i),
@@ -203,10 +216,12 @@ fn scalar_column_to_arrow_array(
                         // Allow narrowing conversion
                         builder.append_value(*i as i32);
                     }
-                    _ => return Err(Error::Schema(format!(
-                        "Type mismatch: expected Int32, got {:?}",
-                        val
-                    ))),
+                    _ => {
+                        return Err(Error::Schema(format!(
+                            "Type mismatch: expected Int32, got {:?}",
+                            val
+                        )))
+                    }
                 }
             }
             Ok(Arc::new(builder.finish()))
@@ -219,15 +234,19 @@ fn scalar_column_to_arrow_array(
                         if nullable {
                             builder.append_null();
                         } else {
-                            return Err(Error::Schema("Null value in non-nullable Int64 column".to_string()));
+                            return Err(Error::Schema(
+                                "Null value in non-nullable Int64 column".to_string(),
+                            ));
                         }
                     }
                     Scalar::I32(i) => builder.append_value(*i as i64),
                     Scalar::I64(i) => builder.append_value(*i),
-                    _ => return Err(Error::Schema(format!(
-                        "Type mismatch: expected Int64, got {:?}",
-                        val
-                    ))),
+                    _ => {
+                        return Err(Error::Schema(format!(
+                            "Type mismatch: expected Int64, got {:?}",
+                            val
+                        )))
+                    }
                 }
             }
             Ok(Arc::new(builder.finish()))
@@ -240,7 +259,9 @@ fn scalar_column_to_arrow_array(
                         if nullable {
                             builder.append_null();
                         } else {
-                            return Err(Error::Schema("Null value in non-nullable Float32 column".to_string()));
+                            return Err(Error::Schema(
+                                "Null value in non-nullable Float32 column".to_string(),
+                            ));
                         }
                     }
                     Scalar::F32(f) => builder.append_value(*f),
@@ -250,10 +271,12 @@ fn scalar_column_to_arrow_array(
                     }
                     Scalar::I32(i) => builder.append_value(*i as f32),
                     Scalar::I64(i) => builder.append_value(*i as f32),
-                    _ => return Err(Error::Schema(format!(
-                        "Type mismatch: expected Float32, got {:?}",
-                        val
-                    ))),
+                    _ => {
+                        return Err(Error::Schema(format!(
+                            "Type mismatch: expected Float32, got {:?}",
+                            val
+                        )))
+                    }
                 }
             }
             Ok(Arc::new(builder.finish()))
@@ -266,17 +289,21 @@ fn scalar_column_to_arrow_array(
                         if nullable {
                             builder.append_null();
                         } else {
-                            return Err(Error::Schema("Null value in non-nullable Float64 column".to_string()));
+                            return Err(Error::Schema(
+                                "Null value in non-nullable Float64 column".to_string(),
+                            ));
                         }
                     }
                     Scalar::F32(f) => builder.append_value(*f as f64),
                     Scalar::F64(f) => builder.append_value(*f),
                     Scalar::I32(i) => builder.append_value(*i as f64),
                     Scalar::I64(i) => builder.append_value(*i as f64),
-                    _ => return Err(Error::Schema(format!(
-                        "Type mismatch: expected Float64, got {:?}",
-                        val
-                    ))),
+                    _ => {
+                        return Err(Error::Schema(format!(
+                            "Type mismatch: expected Float64, got {:?}",
+                            val
+                        )))
+                    }
                 }
             }
             Ok(Arc::new(builder.finish()))
@@ -289,14 +316,18 @@ fn scalar_column_to_arrow_array(
                         if nullable {
                             builder.append_null();
                         } else {
-                            return Err(Error::Schema("Null value in non-nullable Utf8 column".to_string()));
+                            return Err(Error::Schema(
+                                "Null value in non-nullable Utf8 column".to_string(),
+                            ));
                         }
                     }
                     Scalar::Str(s) => builder.append_value(s),
-                    _ => return Err(Error::Schema(format!(
-                        "Type mismatch: expected Utf8, got {:?}",
-                        val
-                    ))),
+                    _ => {
+                        return Err(Error::Schema(format!(
+                            "Type mismatch: expected Utf8, got {:?}",
+                            val
+                        )))
+                    }
                 }
             }
             Ok(Arc::new(builder.finish()))
@@ -309,14 +340,18 @@ fn scalar_column_to_arrow_array(
                         if nullable {
                             builder.append_null();
                         } else {
-                            return Err(Error::Schema("Null value in non-nullable Binary column".to_string()));
+                            return Err(Error::Schema(
+                                "Null value in non-nullable Binary column".to_string(),
+                            ));
                         }
                     }
                     Scalar::Bin(b) => builder.append_value(b),
-                    _ => return Err(Error::Schema(format!(
-                        "Type mismatch: expected Binary, got {:?}",
-                        val
-                    ))),
+                    _ => {
+                        return Err(Error::Schema(format!(
+                            "Type mismatch: expected Binary, got {:?}",
+                            val
+                        )))
+                    }
                 }
             }
             Ok(Arc::new(builder.finish()))
@@ -361,4 +396,3 @@ pub fn emsqrt_to_arrow_schema(schema: &emsqrt_core::schema::Schema) -> ArrowSche
 
 #[cfg(not(feature = "parquet"))]
 compile_error!("arrow_convert.rs was compiled without the `parquet` feature; enable `--features parquet` or exclude this module.");
-

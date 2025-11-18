@@ -78,10 +78,12 @@ impl Operator for ExternalSort {
 
         // Generate a unique spill ID for this sort operation
         // In production, this would come from a global counter or UUID
-        let spill_id = SpillId::new(std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos() as u64);
+        let spill_id = SpillId::new(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos() as u64,
+        );
 
         // For simplicity in this single-batch operator, treat input as one run
         // In a real pipeline, we'd accumulate multiple blocks
@@ -101,10 +103,14 @@ impl Operator for ExternalSort {
             }
             // No runs means empty input
             return Ok(RowBatch {
-                columns: input.columns.iter().map(|c| emsqrt_core::types::Column {
-                    name: c.name.clone(),
-                    values: Vec::new(),
-                }).collect(),
+                columns: input
+                    .columns
+                    .iter()
+                    .map(|c| emsqrt_core::types::Column {
+                        name: c.name.clone(),
+                        values: Vec::new(),
+                    })
+                    .collect(),
             });
         }
 

@@ -9,8 +9,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::{Error, Result};
 use super::Codec;
+use crate::error::{Error, Result};
 
 pub const MAGIC: u32 = 0x45534D51; // "ESMQ" (EM-Sqrt)
 pub const VERSION: u16 = 1;
@@ -27,7 +27,13 @@ pub struct SegmentHeader {
 
 impl SegmentHeader {
     pub fn new(codec: Codec, uncompressed_len: u64, compressed_len: u64) -> Self {
-        Self { magic: MAGIC, version: VERSION, codec, uncompressed_len, compressed_len }
+        Self {
+            magic: MAGIC,
+            version: VERSION,
+            codec,
+            uncompressed_len,
+            compressed_len,
+        }
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
@@ -56,9 +62,15 @@ impl SegmentHeader {
             return Err(Error::Storage("bad magic/version".into()));
         }
 
-        Ok(Self { magic, version, codec, uncompressed_len, compressed_len })
+        Ok(Self {
+            magic,
+            version,
+            codec,
+            uncompressed_len,
+            compressed_len,
+        })
     }
-    
+
     /// Validate that the sizes in the header are reasonable.
     /// This prevents excessive allocations from corrupted/malicious data.
     pub fn validate_sizes(&self, max_uncompressed: u64, max_compressed: u64) -> Result<()> {
@@ -76,7 +88,7 @@ impl SegmentHeader {
         }
         if self.compressed_len > self.uncompressed_len && self.codec != Codec::None {
             return Err(Error::Storage(
-                "compressed_len > uncompressed_len for compressed codec".into()
+                "compressed_len > uncompressed_len for compressed codec".into(),
             ));
         }
         Ok(())

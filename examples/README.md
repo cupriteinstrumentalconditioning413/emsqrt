@@ -38,6 +38,25 @@ steps:
 
 Note: Each step must have an `op` field that specifies the operator type.
 
+## Pipeline Config Block
+
+Pipelines can optionally start with a `config` section that sets spill storage without touching CLI flags:
+
+```yaml
+config:
+  spill_uri: "s3://my-bucket/examples"
+  spill_aws_region: "us-east-1"
+steps:
+  - op: scan
+    source: "data/input.csv"
+    schema: []
+  - op: sink
+    destination: "stdout"
+    format: "csv"
+```
+
+Values from `config` merge with CLI arguments and environment variables.
+
 ## Available Operators
 
 ### Scan
@@ -115,6 +134,7 @@ Write results to a destination. Supports CSV, JSONL, and Parquet formats (Parque
 - **join_pipeline.yaml**: Join operation between two data sources
 - **parquet_pipeline.yaml**: CSV to Parquet conversion with filtering
 - **parquet_scan_pipeline.yaml**: Read Parquet, transform, write Parquet
+- **cloud_spill/pipeline.yaml**: Pipeline pointing spill segments to S3
 
 ### Running Parquet Examples
 
@@ -136,6 +156,9 @@ You can override configuration via command-line flags:
 emsqrt run \
   --pipeline examples/simple_pipeline.yaml \
   --memory-cap 1073741824 \
+  --spill-uri s3://my-bucket/examples \
+  --spill-aws-region us-east-1 \
+  --spill-gcs-service-account /path/to/service-account.json \
   --spill-dir /tmp/emsqrt-spill \
   --max-parallel 4
 ```
@@ -146,6 +169,8 @@ Or via environment variables:
 export EMSQRT_MEM_CAP_BYTES=1073741824
 export EMSQRT_SPILL_DIR=/tmp/emsqrt-spill
 export EMSQRT_MAX_PARALLEL_TASKS=4
+export EMSQRT_SPILL_URI=s3://my-bucket/examples
+export EMSQRT_SPILL_AWS_REGION=us-east-1
 
 emsqrt run --pipeline examples/simple_pipeline.yaml
 ```

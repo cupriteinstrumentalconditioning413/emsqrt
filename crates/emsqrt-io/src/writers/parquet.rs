@@ -82,10 +82,7 @@ impl ParquetWriter {
     /// Create a new ParquetWriter from an emsqrt-core Schema.
     ///
     /// Converts the emsqrt Schema to Arrow Schema automatically.
-    pub fn from_emsqrt_schema(
-        path: &str,
-        schema: &EmsqrtSchema,
-    ) -> Result<Self> {
+    pub fn from_emsqrt_schema(path: &str, schema: &EmsqrtSchema) -> Result<Self> {
         let arrow_schema = Arc::new(emsqrt_to_arrow_schema(schema));
         Self::to_path(path, arrow_schema)
     }
@@ -114,12 +111,11 @@ impl ParquetWriter {
         compression: ParquetCompression,
         row_group_size: Option<usize>,
     ) -> Result<Self> {
-        let file = File::create(path)
-            .map_err(|e| Error::Io(e))?;
+        let file = File::create(path).map_err(|e| Error::Io(e))?;
 
         // Build writer properties
-        let mut props_builder = WriterProperties::builder()
-            .set_compression(compression.to_parquet_compression());
+        let mut props_builder =
+            WriterProperties::builder().set_compression(compression.to_parquet_compression());
 
         // Set row group size if specified
         if let Some(size_bytes) = row_group_size {
@@ -134,10 +130,7 @@ impl ParquetWriter {
         let writer = ArrowWriter::try_new(file, schema.clone(), Some(props))
             .map_err(|e| Error::Other(format!("Failed to create Parquet writer: {}", e)))?;
 
-        Ok(Self {
-            writer,
-            schema,
-        })
+        Ok(Self { writer, schema })
     }
 
     /// Write a RecordBatch to the Parquet file.

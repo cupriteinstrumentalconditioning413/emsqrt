@@ -21,7 +21,7 @@ pub mod physical;
 pub mod rules;
 
 pub use cost::{estimate_work, WorkHint};
-pub use dsl::yaml::parse_yaml_pipeline;
+pub use dsl::yaml::{parse_yaml_pipeline, ParsedPipeline, PipelineConfig};
 pub use logical::{Aggregation, JoinType, LogicalPlan};
 pub use lower::lower_to_physical;
 pub use physical::{OperatorBinding, PhysicalProgram};

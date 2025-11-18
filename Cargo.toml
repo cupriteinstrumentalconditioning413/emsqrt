@@ -34,6 +34,10 @@ arrow-schema = { version = "53", optional = true }
 
 [features]
 parquet = ["emsqrt-io/parquet", "emsqrt-exec/parquet", "arrow-array", "arrow-schema"]
+s3 = ["emsqrt-io/s3"]
+gcs = ["emsqrt-io/gcs"]
+azure = ["emsqrt-io/azure"]
+cloud-all = ["s3", "gcs", "azure"]
 
 [workspace.package]
 version = "0.1.0"
@@ -63,6 +67,9 @@ emsqrt-io = { path = "crates/emsqrt-io" }
 emsqrt-operators = { path = "crates/emsqrt-operators" }
 emsqrt-planner = { path = "crates/emsqrt-planner" }
 emsqrt-exec = { path = "crates/emsqrt-exec" }
+
+[dev-dependencies]
+criterion = { version = "0.5", default-features = false }
 
 [profile.release]
 opt-level = 3

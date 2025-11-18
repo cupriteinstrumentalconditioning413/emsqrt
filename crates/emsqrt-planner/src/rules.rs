@@ -43,6 +43,28 @@ fn projection_pushdown(plan: LogicalPlan) -> LogicalPlan {
             group_by,
             aggs,
         },
+        Window {
+            input,
+            partitions,
+            order_by,
+            functions,
+        } => Window {
+            input: Box::new(projection_pushdown(*input)),
+            partitions,
+            order_by,
+            functions,
+        },
+        Lateral {
+            input,
+            column,
+            alias,
+            delimiter,
+        } => Lateral {
+            input: Box::new(projection_pushdown(*input)),
+            column,
+            alias,
+            delimiter,
+        },
         Join {
             left,
             right,

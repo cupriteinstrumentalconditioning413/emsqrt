@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use emsqrt_core::expr::Expr;
 use emsqrt_core::prelude::Schema;
-use emsqrt_core::types::{Column, RowBatch, Scalar};
+use emsqrt_core::types::{Column, RowBatch};
 
 use crate::plan::{Footprint, OpPlan};
 use crate::traits::{MemoryBudget, OpError, Operator};
@@ -62,13 +62,14 @@ impl Operator for Filter {
         };
 
         // Parse expression string into Expr AST
-        let expr = Expr::parse(expr_str)
-            .map_err(|e| OpError::Exec(format!("failed to parse expression '{}': {}", expr_str, e)))?;
+        let expr = Expr::parse(expr_str).map_err(|e| {
+            OpError::Exec(format!("failed to parse expression '{}': {}", expr_str, e))
+        })?;
 
         // Evaluate expression for each row
         let num_rows = input.num_rows();
         let mut keep = Vec::with_capacity(num_rows);
-        
+
         for row_idx in 0..num_rows {
             match expr.evaluate_bool(input, row_idx) {
                 Ok(b) => keep.push(b),
@@ -103,4 +104,3 @@ impl Operator for Filter {
         })
     }
 }
-

@@ -1,9 +1,3 @@
-//! Concrete implementations of `emsqrt_mem::spill::Storage`.
-//!
-//! - `FsStorage`: local filesystem implementation (read_range, write, etag).
-//! - `S3Storage`, `GcsStorage`, `AzureBlobStorage`: *feature-gated placeholders*
-//!    returning unimplemented errors until wired to real SDKs/object_store.
-
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
@@ -12,7 +6,8 @@ use blake3::Hasher;
 use emsqrt_mem::error::{Error as MemError, Result as MemResult};
 use emsqrt_mem::Storage;
 
-/// Local filesystem storage (rooted at current FS).
+/// Local filesystem storage (rooted at the host filesystem).
+#[derive(Debug, Clone, Default)]
 pub struct FsStorage;
 
 impl FsStorage {
@@ -119,80 +114,5 @@ impl Storage for FsStorage {
             }
             Err(_) => Ok(None),
         }
-    }
-}
-
-#[cfg(feature = "s3")]
-pub struct S3Storage;
-#[cfg(feature = "s3")]
-impl S3Storage {
-    pub fn new() -> Self {
-        Self
-    }
-}
-#[cfg(feature = "s3")]
-impl Storage for S3Storage {
-    fn write(&self, _path: &str, _bytes: &[u8]) -> MemResult<()> {
-        Err(MemError::Storage("S3Storage::write not implemented".into()))
-    }
-    fn read_range(&self, _path: &str, _offset: u64, _len: usize) -> MemResult<Vec<u8>> {
-        Err(MemError::Storage(
-            "S3Storage::read_range not implemented".into(),
-        ))
-    }
-    fn etag(&self, _path: &str) -> MemResult<Option<String>> {
-        Err(MemError::Storage("S3Storage::etag not implemented".into()))
-    }
-}
-
-#[cfg(feature = "gcs")]
-pub struct GcsStorage;
-#[cfg(feature = "gcs")]
-impl GcsStorage {
-    pub fn new() -> Self {
-        Self
-    }
-}
-#[cfg(feature = "gcs")]
-impl Storage for GcsStorage {
-    fn write(&self, _path: &str, _bytes: &[u8]) -> MemResult<()> {
-        Err(MemError::Storage(
-            "GcsStorage::write not implemented".into(),
-        ))
-    }
-    fn read_range(&self, _path: &str, _offset: u64, _len: usize) -> MemResult<Vec<u8>> {
-        Err(MemError::Storage(
-            "GcsStorage::read_range not implemented".into(),
-        ))
-    }
-    fn etag(&self, _path: &str) -> MemResult<Option<String>> {
-        Err(MemError::Storage("GcsStorage::etag not implemented".into()))
-    }
-}
-
-#[cfg(feature = "azure")]
-pub struct AzureBlobStorage;
-#[cfg(feature = "azure")]
-impl AzureBlobStorage {
-    pub fn new() -> Self {
-        Self
-    }
-}
-#[cfg(feature = "azure")]
-impl Storage for AzureBlobStorage {
-    fn write(&self, _path: &str, _bytes: &[u8]) -> MemResult<()> {
-        Err(MemError::Storage(
-            "AzureBlobStorage::write not implemented".into(),
-        ))
-    }
-    fn read_range(&self, _path: &str, _offset: u64, _len: usize) -> MemResult<Vec<u8>> {
-        Err(MemError::Storage(
-            "AzureBlobStorage::read_range not implemented".into(),
-        ))
-    }
-    fn etag(&self, _path: &str) -> MemResult<Option<String>> {
-        Err(MemError::Storage(
-            "AzureBlobStorage::etag not implemented".into(),
-        ))
     }
 }

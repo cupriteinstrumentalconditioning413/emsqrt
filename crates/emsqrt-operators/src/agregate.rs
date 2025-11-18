@@ -7,7 +7,6 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use emsqrt_core::budget::MemoryBudget;
-use emsqrt_core::id::SpillId;
 use emsqrt_core::prelude::{DataType, Field, Schema};
 use emsqrt_core::types::{Column, RowBatch, Scalar};
 use emsqrt_mem::guard::BudgetGuardImpl;
@@ -57,10 +56,18 @@ impl AggFunc {
     pub fn output_field(&self) -> Field {
         match self {
             AggFunc::Count => Field::new("count", DataType::Int64, false),
-            AggFunc::Sum { column } => Field::new(format!("sum_{}", column), DataType::Float64, true),
-            AggFunc::Min { column } => Field::new(format!("min_{}", column), DataType::Float64, true),
-            AggFunc::Max { column } => Field::new(format!("max_{}", column), DataType::Float64, true),
-            AggFunc::Avg { column } => Field::new(format!("avg_{}", column), DataType::Float64, true),
+            AggFunc::Sum { column } => {
+                Field::new(format!("sum_{}", column), DataType::Float64, true)
+            }
+            AggFunc::Min { column } => {
+                Field::new(format!("min_{}", column), DataType::Float64, true)
+            }
+            AggFunc::Max { column } => {
+                Field::new(format!("max_{}", column), DataType::Float64, true)
+            }
+            AggFunc::Avg { column } => {
+                Field::new(format!("avg_{}", column), DataType::Float64, true)
+            }
         }
     }
 }
@@ -244,7 +251,9 @@ impl Aggregate {
                             .columns
                             .iter()
                             .find(|c| &c.name == column)
-                            .ok_or_else(|| OpError::Exec(format!("agg column '{}' not found", column)))?;
+                            .ok_or_else(|| {
+                                OpError::Exec(format!("agg column '{}' not found", column))
+                            })?;
 
                         let val_f64 = match &val_col.values[row_idx] {
                             Scalar::I32(i) => *i as f64,
@@ -281,7 +290,7 @@ impl Aggregate {
                 values: Vec::with_capacity(groups.len()),
             };
 
-            for (key, agg_val) in &groups {
+            for (_key, agg_val) in &groups {
                 let result = match func {
                     AggFunc::Count => Scalar::I64(agg_val.count as i64),
                     AggFunc::Sum { .. } => Scalar::F64(agg_val.sum),

@@ -6,13 +6,13 @@
 #[cfg(not(feature = "arrow"))]
 compile_error!("arrow module requires 'arrow' feature to be enabled");
 
-use arrow_array::{
-    Array, ArrayRef, BinaryArray, BooleanArray, Float32Array, Float64Array, Int32Array, Int64Array,
-    RecordBatch, StringArray,
-};
 use arrow_array::builder::{
     BinaryBuilder, BooleanBuilder, Float32Builder, Float64Builder, Int32Builder, Int64Builder,
     StringBuilder,
+};
+use arrow_array::{
+    Array, ArrayRef, BinaryArray, BooleanArray, Float32Array, Float64Array, Int32Array, Int64Array,
+    RecordBatch, StringArray,
 };
 use arrow_schema::{DataType as ArrowDataType, Field as ArrowField, Schema as ArrowSchema};
 
@@ -24,13 +24,7 @@ pub fn schema_to_arrow(schema: &Schema) -> ArrowSchema {
     let fields: Vec<ArrowField> = schema
         .fields
         .iter()
-        .map(|f| {
-            ArrowField::new(
-                f.name.clone(),
-                data_type_to_arrow(&f.data_type),
-                f.nullable,
-            )
-        })
+        .map(|f| ArrowField::new(f.name.clone(), data_type_to_arrow(&f.data_type), f.nullable))
         .collect();
     ArrowSchema::new(fields)
 }
@@ -225,11 +219,7 @@ fn column_to_arrow_array(column: &Column, num_rows: usize) -> Result<ArrayRef, S
 }
 
 /// Convert an Arrow `ArrayRef` to a `Column`.
-fn arrow_array_to_column(
-    array: &ArrayRef,
-    name: &str,
-    num_rows: usize,
-) -> Result<Column, String> {
+fn arrow_array_to_column(array: &ArrayRef, name: &str, num_rows: usize) -> Result<Column, String> {
     let mut values = Vec::with_capacity(num_rows);
 
     match array.data_type() {
@@ -303,7 +293,12 @@ fn arrow_array_to_column(
                 }
             }
         }
-        _ => return Err(format!("Unsupported Arrow data type: {:?}", array.data_type())),
+        _ => {
+            return Err(format!(
+                "Unsupported Arrow data type: {:?}",
+                array.data_type()
+            ))
+        }
     }
 
     Ok(Column {
@@ -313,4 +308,3 @@ fn arrow_array_to_column(
 }
 
 use std::sync::Arc;
-

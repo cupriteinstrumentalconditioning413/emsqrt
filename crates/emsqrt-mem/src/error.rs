@@ -37,13 +37,19 @@ impl Error {
     pub fn with_context(self, context: impl Into<String>) -> Self {
         let ctx = context.into();
         match self {
-            Error::BudgetExceeded { tag, requested, capacity, used } => {
-                Error::Budget(format!("{}: budget exceeded for tag '{}': requested {} bytes, capacity {}, used {}", 
-                    ctx, tag, requested, capacity, used))
-            }
-            Error::AllocFailed { tag, bytes } => {
-                Error::Budget(format!("{}: allocation failed for {} bytes (tag '{}')", ctx, bytes, tag))
-            }
+            Error::BudgetExceeded {
+                tag,
+                requested,
+                capacity,
+                used,
+            } => Error::Budget(format!(
+                "{}: budget exceeded for tag '{}': requested {} bytes, capacity {}, used {}",
+                ctx, tag, requested, capacity, used
+            )),
+            Error::AllocFailed { tag, bytes } => Error::Budget(format!(
+                "{}: allocation failed for {} bytes (tag '{}')",
+                ctx, bytes, tag
+            )),
             Error::Budget(msg) => Error::Budget(format!("{}: {}", ctx, msg)),
             Error::Storage(msg) => Error::Storage(format!("{}: {}", ctx, msg)),
             Error::Codec(msg) => Error::Codec(format!("{}: {}", ctx, msg)),
@@ -54,7 +60,11 @@ impl Error {
     /// Get suggestions for common errors.
     pub fn suggestions(&self) -> Vec<String> {
         match self {
-            Error::BudgetExceeded { requested, capacity, .. } => {
+            Error::BudgetExceeded {
+                requested,
+                capacity,
+                ..
+            } => {
                 vec![
                     format!("Requested {} bytes but only {} bytes available", requested, capacity),
                     "Try increasing memory_cap_bytes in configuration".into(),

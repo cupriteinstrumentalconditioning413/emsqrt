@@ -82,10 +82,7 @@ pub enum Expr {
         right: Box<Expr>,
     },
     /// Unary operation: OP arg
-    UnaryOp {
-        op: UnaryOp,
-        arg: Box<Expr>,
-    },
+    UnaryOp { op: UnaryOp, arg: Box<Expr> },
 }
 
 impl Expr {
@@ -97,24 +94,21 @@ impl Expr {
     /// - Arithmetic operators (+, -, *, /) have highest precedence
     pub fn parse(expr_str: &str) -> Result<Self, String> {
         let expr_str = expr_str.trim();
-        
+
         // Parse with operator precedence: logical operators last (lowest precedence)
         // This allows expressions like "age > 20 AND price < 15" to be parsed correctly
-        
+
         // First, try to find logical operators (AND/OR) - these have lowest precedence
         // We need to find the rightmost AND/OR to handle left-associativity
         // Check for " AND " first (with spaces), then " OR " (with spaces)
         // This avoids matching "AND" inside column names
-        let logical_ops = [
-            (" AND ", BinOp::And),
-            (" OR ", BinOp::Or),
-        ];
-        
+        let logical_ops = [(" AND ", BinOp::And), (" OR ", BinOp::Or)];
+
         // Find the rightmost logical operator
         let mut best_pos: Option<usize> = None;
         let mut best_op: Option<BinOp> = None;
         let mut best_op_str: Option<&str> = None;
-        
+
         for (op_str, op) in &logical_ops {
             if let Some(pos) = expr_str.rfind(op_str) {
                 if best_pos.map_or(true, |best| pos > best) {
@@ -124,13 +118,13 @@ impl Expr {
                 }
             }
         }
-        
+
         if let (Some(pos), Some(op), Some(op_str)) = (best_pos, best_op, best_op_str) {
             let left_str = expr_str[..pos].trim();
             let right_str = expr_str[pos + op_str.len()..].trim();
-            
+
             if !left_str.is_empty() && !right_str.is_empty() {
-                let left = Self::parse(left_str)?;  // Recursive parse
+                let left = Self::parse(left_str)?; // Recursive parse
                 let right = Self::parse(right_str)?; // Recursive parse
                 return Ok(Expr::BinaryOp {
                     op,
@@ -139,16 +133,16 @@ impl Expr {
                 });
             }
         }
-        
+
         // Then, try comparison operators
         for op_str in &["==", "!=", "<=", ">=", "<", ">"] {
             if let Some(pos) = expr_str.find(op_str) {
                 let left_str = expr_str[..pos].trim();
                 let right_str = expr_str[pos + op_str.len()..].trim();
-                
+
                 if !left_str.is_empty() && !right_str.is_empty() {
                     let op = BinOp::parse(op_str)?;
-                    let left = Self::parse(left_str)?;  // Recursive parse for nested expressions
+                    let left = Self::parse(left_str)?; // Recursive parse for nested expressions
                     let right = Self::parse(right_str)?; // Recursive parse for nested expressions
                     return Ok(Expr::BinaryOp {
                         op,
@@ -158,16 +152,16 @@ impl Expr {
                 }
             }
         }
-        
+
         // Finally, try arithmetic operators (highest precedence)
         for op_str in &["+", "-", "*", "/"] {
             if let Some(pos) = expr_str.find(op_str) {
                 let left_str = expr_str[..pos].trim();
                 let right_str = expr_str[pos + op_str.len()..].trim();
-                
+
                 if !left_str.is_empty() && !right_str.is_empty() {
                     let op = BinOp::parse(op_str)?;
-                    let left = Self::parse(left_str)?;  // Recursive parse for nested expressions
+                    let left = Self::parse(left_str)?; // Recursive parse for nested expressions
                     let right = Self::parse(right_str)?; // Recursive parse for nested expressions
                     return Ok(Expr::BinaryOp {
                         op,
@@ -177,7 +171,7 @@ impl Expr {
                 }
             }
         }
-        
+
         // Try to parse as a single atom (column or literal)
         Self::parse_atom(expr_str)
     }
@@ -185,12 +179,12 @@ impl Expr {
     /// Parse an atomic expression (column or literal).
     fn parse_atom(atom_str: &str) -> Result<Self, String> {
         let atom_str = atom_str.trim();
-        
+
         // Try to parse as literal first
         if let Ok(scalar) = parse_literal(atom_str) {
             return Ok(Expr::Literal(scalar));
         }
-        
+
         // Otherwise, treat as column reference
         Ok(Expr::Column(atom_str.to_string()))
     }
@@ -207,14 +201,18 @@ impl Expr {
                     .iter()
                     .find(|c| &c.name == name)
                     .ok_or_else(|| {
-                        let available: Vec<String> = batch.columns.iter().map(|c| c.name.clone()).collect();
-                        format!("column '{}' not found. Available columns: {:?}", name, available)
+                        let available: Vec<String> =
+                            batch.columns.iter().map(|c| c.name.clone()).collect();
+                        format!(
+                            "column '{}' not found. Available columns: {:?}",
+                            name, available
+                        )
                     })?;
-                
+
                 if row_idx >= col.values.len() {
                     return Err(format!("row index {} out of bounds", row_idx));
                 }
-                
+
                 Ok(col.values[row_idx].clone())
             }
             Expr::Literal(scalar) => Ok(scalar.clone()),
@@ -242,12 +240,12 @@ impl Expr {
 /// Parse a literal string into a Scalar value.
 fn parse_literal(literal: &str) -> Result<Scalar, String> {
     let trimmed = literal.trim();
-    
+
     // Try boolean
     if let Ok(b) = trimmed.parse::<bool>() {
         return Ok(Scalar::Bool(b));
     }
-    
+
     // Try integer (i32 first, then i64)
     if let Ok(i) = trimmed.parse::<i32>() {
         return Ok(Scalar::I32(i));
@@ -255,7 +253,7 @@ fn parse_literal(literal: &str) -> Result<Scalar, String> {
     if let Ok(i) = trimmed.parse::<i64>() {
         return Ok(Scalar::I64(i));
     }
-    
+
     // Try float (f32 first, then f64)
     if let Ok(f) = trimmed.parse::<f32>() {
         return Ok(Scalar::F32(f));
@@ -263,21 +261,22 @@ fn parse_literal(literal: &str) -> Result<Scalar, String> {
     if let Ok(f) = trimmed.parse::<f64>() {
         return Ok(Scalar::F64(f));
     }
-    
+
     // Try string (remove quotes if present)
-    if (trimmed.starts_with('"') && trimmed.ends_with('"')) ||
-       (trimmed.starts_with('\'') && trimmed.ends_with('\'')) {
-        let unquoted = &trimmed[1..trimmed.len()-1];
+    if (trimmed.starts_with('"') && trimmed.ends_with('"'))
+        || (trimmed.starts_with('\'') && trimmed.ends_with('\''))
+    {
+        let unquoted = &trimmed[1..trimmed.len() - 1];
         return Ok(Scalar::Str(unquoted.to_string()));
     }
-    
+
     Err(format!("cannot parse '{}' as literal", literal))
 }
 
 /// Evaluate a binary operation.
 fn evaluate_binary_op(op: BinOp, left: &Scalar, right: &Scalar) -> Result<Scalar, String> {
     use Scalar::*;
-    
+
     match op {
         BinOp::Eq => Ok(Scalar::Bool(scalar_eq(left, right))),
         BinOp::Ne => Ok(Scalar::Bool(!scalar_eq(left, right))),
@@ -365,7 +364,10 @@ fn evaluate_binary_op(op: BinOp, left: &Scalar, right: &Scalar) -> Result<Scalar
                 // Cross-type float operations (F32/F64)
                 (F32(a), F64(b)) => Ok(Scalar::F64(*a as f64 * b)),
                 (F64(a), F32(b)) => Ok(Scalar::F64(a * *b as f64)),
-                _ => Err(format!("unsupported multiplication: {:?} * {:?}", left, right)),
+                _ => Err(format!(
+                    "unsupported multiplication: {:?} * {:?}",
+                    left, right
+                )),
             }
         }
         BinOp::Div => {
@@ -523,7 +525,7 @@ fn scalar_eq(a: &Scalar, b: &Scalar) -> bool {
 fn scalar_cmp(a: &Scalar, b: &Scalar) -> std::cmp::Ordering {
     use std::cmp::Ordering;
     use Scalar::*;
-    
+
     match (a, b) {
         (Null, Null) => Ordering::Equal,
         (Null, _) => Ordering::Less,
@@ -588,4 +590,3 @@ fn scalar_to_bool(scalar: &Scalar) -> Result<bool, String> {
         Bin(b) => Ok(!b.is_empty()),
     }
 }
-

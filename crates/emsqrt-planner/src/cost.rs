@@ -57,27 +57,32 @@ pub fn estimate_work(plan: &LogicalPlan, hints: Option<&WorkHint>) -> WorkEstima
             }
             Filter { input, expr } => {
                 let in_rows = walk(input, hints, acc_rows, acc_bytes, max_fan_in);
-                
+
                 // Try to estimate selectivity using statistics
                 let selectivity = estimate_filter_selectivity(expr, input);
                 let out_rows = ((in_rows as f64) * selectivity) as u64;
                 out_rows.max(1)
             }
-            Map { input, .. } | Project { input, .. } => {
-                walk(input, hints, acc_rows, acc_bytes, max_fan_in)
-            }
-            Join { left, right, on, .. } => {
+            Map { input, .. }
+            | Project { input, .. }
+            | Window { input, .. }
+            | Lateral { input, .. } => walk(input, hints, acc_rows, acc_bytes, max_fan_in),
+            Join {
+                left, right, on, ..
+            } => {
                 *max_fan_in = (*max_fan_in).max(2);
                 let l = walk(left, hints, acc_rows, acc_bytes, max_fan_in);
                 let r = walk(right, hints, acc_rows, acc_bytes, max_fan_in);
-                
+
                 // Try to estimate join cardinality using statistics
                 let join_card = estimate_join_cardinality(left, right, on, l, r);
                 join_card.max(1)
             }
-            Aggregate { input, group_by, .. } => {
+            Aggregate {
+                input, group_by, ..
+            } => {
                 let in_rows = walk(input, hints, acc_rows, acc_bytes, max_fan_in);
-                
+
                 // Try to estimate groups using statistics
                 let groups = estimate_aggregate_groups(input, group_by, in_rows);
                 groups.max(1)
@@ -107,12 +112,12 @@ fn estimate_filter_selectivity(expr: &str, input_plan: &LogicalPlan) -> f64 {
     // Simple heuristic: try to parse the expression and use stats if available
     // For now, parse simple predicates like "col OP literal"
     let ops = ["==", "!=", "<=", ">=", "<", ">"];
-    
+
     for op in &ops {
         if let Some(pos) = expr.find(op) {
             let col_name = expr[..pos].trim();
             let literal_str = expr[pos + op.len()..].trim();
-            
+
             // Try to get schema from input plan
             if let Some(schema) = get_schema_from_plan(input_plan) {
                 if let Some(stats_opt) = &schema.stats {
@@ -140,7 +145,7 @@ fn estimate_filter_selectivity(expr: &str, input_plan: &LogicalPlan) -> f64 {
             }
         }
     }
-    
+
     // Fallback: conservative 50% selectivity
     0.5
 }
@@ -158,18 +163,18 @@ fn estimate_join_cardinality(
     // Get schemas from plans
     let left_schema = get_schema_from_plan(left_plan);
     let right_schema = get_schema_from_plan(right_plan);
-    
+
     // Try to use distinct_count from statistics
     if let (Some(left_schema), Some(right_schema)) = (left_schema, right_schema) {
         if let (Some(left_stats), Some(right_stats)) = (&left_schema.stats, &right_schema.stats) {
             if let Some((left_col, right_col)) = on.first() {
-                if let (Some(left_col_stats), Some(right_col_stats)) = 
-                    (left_stats.get(left_col), right_stats.get(right_col)) {
-                    
+                if let (Some(left_col_stats), Some(right_col_stats)) =
+                    (left_stats.get(left_col), right_stats.get(right_col))
+                {
                     // Use distinct_count if available
                     let left_distinct = left_col_stats.distinct_count.unwrap_or(left_rows);
                     let right_distinct = right_col_stats.distinct_count.unwrap_or(right_rows);
-                    
+
                     // Estimate: rows * rows / max(distinct_left, distinct_right)
                     // This is a simplified model assuming uniform distribution
                     let max_distinct = left_distinct.max(right_distinct);
@@ -180,7 +185,7 @@ fn estimate_join_cardinality(
             }
         }
     }
-    
+
     // Fallback: conservative estimate (min of left and right)
     left_rows.min(right_rows)
 }
@@ -196,13 +201,13 @@ fn estimate_aggregate_groups(
     if group_by.is_empty() {
         return 1; // No grouping, single aggregate row
     }
-    
+
     // Get schema from input plan
     if let Some(schema) = get_schema_from_plan(input_plan) {
         if let Some(stats) = &schema.stats {
             // Estimate groups using distinct_count of group_by columns
             let mut estimated_groups = 1u64;
-            
+
             for col_name in group_by {
                 if let Some(col_stats) = stats.get(col_name) {
                     if let Some(distinct) = col_stats.distinct_count {
@@ -212,13 +217,13 @@ fn estimate_aggregate_groups(
                     }
                 }
             }
-            
+
             if estimated_groups > 1 {
                 return estimated_groups.min(input_rows);
             }
         }
     }
-    
+
     // Fallback: assume 10% reduction (conservative)
     (input_rows / 10).max(1)
 }
@@ -232,14 +237,16 @@ fn get_schema_from_plan(plan: &LogicalPlan) -> Option<&Schema> {
         Map { input, .. } | Project { input, .. } => get_schema_from_plan(input),
         Join { left, .. } => get_schema_from_plan(left), // Use left schema as approximation
         Aggregate { input, .. } => get_schema_from_plan(input),
-        Sink { input, .. } => get_schema_from_plan(input),
+        Sink { input, .. } | Window { input, .. } | Lateral { input, .. } => {
+            get_schema_from_plan(input)
+        }
     }
 }
 
 /// Parse a literal string as a Scalar value.
 fn parse_literal_as_scalar(literal: &str) -> Result<emsqrt_core::types::Scalar, String> {
     use emsqrt_core::types::Scalar;
-    
+
     // Try to parse as different types
     if let Ok(i) = literal.parse::<i32>() {
         return Ok(Scalar::I32(i));
@@ -256,15 +263,16 @@ fn parse_literal_as_scalar(literal: &str) -> Result<emsqrt_core::types::Scalar, 
     if let Ok(b) = literal.parse::<bool>() {
         return Ok(Scalar::Bool(b));
     }
-    
+
     // Try removing quotes for strings
     let trimmed = literal.trim();
-    if (trimmed.starts_with('"') && trimmed.ends_with('"')) ||
-       (trimmed.starts_with('\'') && trimmed.ends_with('\'')) {
-        let unquoted = &trimmed[1..trimmed.len()-1];
+    if (trimmed.starts_with('"') && trimmed.ends_with('"'))
+        || (trimmed.starts_with('\'') && trimmed.ends_with('\''))
+    {
+        let unquoted = &trimmed[1..trimmed.len() - 1];
         return Ok(Scalar::Str(unquoted.to_string()));
     }
-    
+
     // Default to string
     Ok(Scalar::Str(literal.to_string()))
 }

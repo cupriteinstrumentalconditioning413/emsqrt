@@ -5,7 +5,7 @@
 //! - Handle renames/expressions.
 //! - Switch to columnar (Arrow) arrays internally.
 
-use emsqrt_core::prelude::{Field, Schema};
+use emsqrt_core::prelude::Schema;
 use emsqrt_core::types::{Column, RowBatch};
 
 use crate::plan::{Footprint, OpPlan};

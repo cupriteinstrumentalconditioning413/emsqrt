@@ -14,6 +14,7 @@ EM-√ is an external-memory ETL/log processing engine with **hard peak-RAM guar
 - **External-Memory Operators**: Sort, join, and aggregate operations automatically spill to disk when memory limits are hit.
 - **Tree Evaluation (TE) Scheduling**: Principled execution schedule that decomposes plans into blocks with bounded fan-in to control peak memory.
 - **Cloud-Ready**: Spill segments support local filesystem with checksums and compression. S3 and GCS adapters are planned.
+- **Pluggable Spill Storage**: Point spills at local paths or cloud object stores (S3, GCS, Azure) with retry/backoff controls.
 - **Parquet Support**: Native columnar Parquet I/O with Arrow integration (optional `--features parquet`).
 - **Grace Hash Join**: Automatic partition-based hash join for datasets exceeding memory limits.
 - **Deterministic Execution**: Stable plan hashing for reproducibility and auditability.
@@ -89,7 +90,7 @@ let mut config = EngineConfig::default();
 config.mem_cap_bytes = 512 * 1024 * 1024; // 512MB
 config.spill_dir = "/tmp/emsqrt-spill".to_string();
 
-let mut engine = Engine::new(config);
+let mut engine = Engine::new(config).expect("engine initialization");
 let manifest = engine.run(&phys_prog, &te)?;
 
 println!("Execution completed in {}ms", manifest.finished_ms - manifest.started_ms);
@@ -121,6 +122,24 @@ steps:
 
 **Note**: Currently supports `scan`, `filter`, `project`, `map`, and `sink`. Aggregate and join operators are not yet supported in YAML (use the programmatic API for these operations).
 
+Add an optional `config` block to describe spill targets without touching CLI flags:
+
+```yaml
+config:
+  spill_uri: "s3://my-bucket/spill"
+  spill_aws_region: "us-east-1"
+  spill_gcs_service_account: "/path/to/service-account.json"
+steps:
+  - op: scan
+    source: "data/logs.csv"
+    schema: []
+  - op: sink
+    destination: "stdout"
+    format: "csv"
+```
+
+Values from `config` merge with environment variables and command-line overrides.
+
 **Parquet Support**: Scan and Sink operators support Parquet format when built with `--features parquet`. Files are automatically detected by extension (`.parquet`, `.parq`) or can be explicitly specified with `format: "parquet"`.
 
 #### CLI Usage
@@ -141,11 +160,28 @@ emsqrt run --pipeline examples/simple_pipeline.yaml
 emsqrt run \
   --pipeline examples/simple_pipeline.yaml \
   --memory-cap 1073741824 \
+  --spill-uri s3://my-bucket/spill \
+  --spill-aws-region us-east-1 \
+  --spill-aws-access-key-id AKIA... \
+  --spill-aws-secret-access-key SECRET... \
+  --spill-gcs-service-account /path/to/sa.json \
+  --spill-azure-access-key azureKey \
+  --spill-retry-max 5 \
   --spill-dir /tmp/emsqrt-spill \
   --max-parallel 4
 ```
 
 See `examples/README.md` for more details on YAML pipeline syntax.
+
+### Cloud Spill Authentication
+
+When using S3/GCS/Azure spill URIs, provide credentials via CLI flags, environment variables, or the platform's SDK defaults:
+
+- **S3**: export `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` or use `aws configure`; optionally include `--spill-aws-region`.
+- **GCS**: set `GOOGLE_SERVICE_ACCOUNT`/`GOOGLE_SERVICE_ACCOUNT_PATH` or run `gcloud auth application-default login`.
+- **Azure**: use `az login` and `AZURE_STORAGE_CONNECTION_STRING` or pass `--spill-azure-access-key`.
+
+The `config` block in `examples/cloud_spill/pipeline.yaml` illustrates a spill URI plus retry tuning so you can avoid repeating CLI flags per run.
 
 ## Examples of Practical Use Cases
 
@@ -272,6 +308,16 @@ pub struct EngineConfig {
 export EMSQRT_MEM_CAP_BYTES=536870912  # 512MB
 export EMSQRT_SPILL_DIR=/tmp/emsqrt-spill
 export EMSQRT_MAX_PARALLEL_TASKS=4
+export EMSQRT_SPILL_URI=s3://my-bucket/emsqrt
+export EMSQRT_SPILL_AWS_REGION=us-east-1
+export EMSQRT_SPILL_AWS_ACCESS_KEY_ID=AKIA...
+export EMSQRT_SPILL_AWS_SECRET_ACCESS_KEY=SECRET...
+export EMSQRT_SPILL_AWS_SESSION_TOKEN=optionalSession
+export EMSQRT_SPILL_GCS_SA_PATH=/path/to/service-account.json
+export EMSQRT_SPILL_AZURE_ACCESS_KEY=azureKey
+export EMSQRT_SPILL_RETRY_MAX_RETRIES=5
+export EMSQRT_SPILL_RETRY_INITIAL_MS=250
+export EMSQRT_SPILL_RETRY_MAX_MS=5000
 ```
 
 ### Default Configuration
@@ -283,6 +329,26 @@ EngineConfig::default()
 // max_parallel_tasks: 4
 // spill_dir: "/tmp/emsqrt-spill"
 ```
+
+#### StorageConfig
+
+```rust
+pub struct StorageConfig {
+    pub uri: Option<String>,        // e.g. s3://bucket/prefix
+    pub root: String,               // normalized spill root
+    pub aws_region: Option<String>,
+    pub aws_access_key_id: Option<String>,
+    pub aws_secret_access_key: Option<String>,
+    pub aws_session_token: Option<String>,
+    pub gcs_service_account_path: Option<String>,
+    pub azure_access_key: Option<String>,
+    pub retry_max_retries: usize,
+    pub retry_initial_backoff_ms: u64,
+    pub retry_max_backoff_ms: u64,
+}
+```
+
+`EngineConfig::storage_config()` produces this snapshot and `emsqrt-io` uses it to choose between filesystem and cloud adapters.
 
 ## Building & Testing
 
@@ -391,6 +457,8 @@ If `try_acquire` returns `None`, the operator must spill or partition.
 - Join 1GB × 1GB with 50MB memory
 - Aggregate 1M groups with 20MB memory
 - TPC-H queries (Q1, Q3, Q6)
+
+See `docs/benchmarks.md` for the current Criterion harness and the `scripts/benchmarks/run_benchmarks.sh` helper.
 
 ### Expected Characteristics
 

@@ -11,7 +11,7 @@ use emsqrt_core::schema::{DataType, Field, Schema};
 use emsqrt_core::types::{Column, RowBatch, Scalar};
 use serde_json::Value;
 
-use crate::error::{Error, Result};
+use crate::error::Result;
 
 pub struct JsonlReader<R: Read> {
     reader: BufReader<R>,

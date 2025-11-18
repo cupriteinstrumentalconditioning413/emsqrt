@@ -10,6 +10,7 @@ use crate::filter::Filter;
 use crate::map::Map;
 use crate::project::Project;
 use crate::traits::Operator;
+use crate::window::{LateralExplodeOp, WindowOp};
 
 pub struct Registry {
     makers: HashMap<&'static str, fn() -> Box<dyn Operator>>,
@@ -24,9 +25,17 @@ impl Registry {
         r.register("map", || Box::new(Map::default()));
         r.register("project", || Box::new(Project::default()));
         r.register("aggregate", || Box::new(Aggregate::default()));
-        r.register("sort_external", || Box::new(crate::sort::external::ExternalSort::default()));
-        r.register("join_hash", || Box::new(crate::join::hash::HashJoin::default()));
-        r.register("join_merge", || Box::new(crate::join::merge::MergeJoin::default()));
+        r.register("sort_external", || {
+            Box::new(crate::sort::external::ExternalSort::default())
+        });
+        r.register("join_hash", || {
+            Box::new(crate::join::hash::HashJoin::default())
+        });
+        r.register("join_merge", || {
+            Box::new(crate::join::merge::MergeJoin::default())
+        });
+        r.register("window", || Box::new(WindowOp::default()));
+        r.register("lateral_explode", || Box::new(LateralExplodeOp::default()));
         r
     }
 

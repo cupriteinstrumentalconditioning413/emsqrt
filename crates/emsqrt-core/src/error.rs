@@ -57,16 +57,20 @@ impl Error {
                 // Try to extract column name from schema error
                 if msg.contains("unknown column") || msg.contains("column") {
                     // Could add fuzzy matching here if we had access to schema
-                    vec!["Check that the column name is spelled correctly".into(),
-                         "Verify the column exists in the input schema".into()]
+                    vec![
+                        "Check that the column name is spelled correctly".into(),
+                        "Verify the column exists in the input schema".into(),
+                    ]
                 } else {
                     vec![]
                 }
             }
             Error::Config(msg) => {
                 if msg.contains("memory") || msg.contains("cap") {
-                    vec!["Try increasing the memory cap".into(),
-                         "Check that memory_cap_bytes is set correctly".into()]
+                    vec![
+                        "Try increasing the memory cap".into(),
+                        "Check that memory_cap_bytes is set correctly".into(),
+                    ]
                 } else {
                     vec![]
                 }

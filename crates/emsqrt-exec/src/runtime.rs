@@ -22,10 +22,11 @@ use emsqrt_core::types::RowBatch;
 use emsqrt_mem::guard::MemoryBudgetImpl;
 use emsqrt_mem::{Codec, SpillManager};
 
-use emsqrt_io::storage::FsStorage;
+use emsqrt_io::storage::build_storage_from_config;
 
 use emsqrt_operators::registry::Registry;
 use emsqrt_operators::traits::{OpError, Operator}; // placeholder alias (Vec<RowBatch>)
+use emsqrt_operators::window::{LateralExplodeOp, WindowFnKind, WindowFnSpec, WindowOp};
 
 use emsqrt_planner::physical::PhysicalProgram;
 use emsqrt_te::tree_eval::TePlan;
@@ -42,32 +43,35 @@ pub enum ExecError {
     Invalid(String),
     #[error("hashing error: {0}")]
     Hash(String),
+    #[error("storage config error: {0}")]
+    Storage(String),
 }
 
 /// Engine owns the memory budget, operator registry, and spill manager.
 pub struct Engine {
-    cfg: EngineConfig,
+    _cfg: EngineConfig,
     budget: MemoryBudgetImpl,
     registry: Registry,
     spill_mgr: Arc<Mutex<SpillManager>>,
 }
 
 impl Engine {
-    pub fn new(cfg: EngineConfig) -> Self {
+    pub fn new(cfg: EngineConfig) -> Result<Self, ExecError> {
         let cap = cfg.mem_cap_bytes;
-        let spill_dir = cfg.spill_dir.clone();
+        let storage_cfg = cfg.storage_config();
 
-        // Create spill manager with FsStorage
-        let storage = Box::new(FsStorage::new());
+        // Create spill manager with configured storage backend
+        let storage = build_storage_from_config(&storage_cfg)
+            .map_err(|e| ExecError::Storage(e.to_string()))?;
         let codec = Codec::None; // Default to no compression; can be made configurable
-        let spill_mgr = SpillManager::new(storage, codec, spill_dir);
+        let spill_mgr = SpillManager::new(storage, codec, storage_cfg.root.clone());
 
-        Self {
-            cfg,
+        Ok(Self {
+            _cfg: cfg,
             budget: MemoryBudgetImpl::new(cap),
             registry: Registry::new(),
             spill_mgr: Arc::new(Mutex::new(spill_mgr)),
-        }
+        })
     }
 
     /// Execute a prepared `PhysicalProgram` under `TePlan` and return a manifest.
@@ -92,10 +96,16 @@ impl Engine {
             let config = &binding.config;
             let inst: Box<dyn Operator> = match key {
                 "source" => {
-                    let source_uri = config.get("source")
-                        .and_then(|v| v.as_str())
-                        .ok_or_else(|| ExecError::Registry("source operator missing 'source' in config".into()))?;
-                    
+                    let source_uri =
+                        config
+                            .get("source")
+                            .and_then(|v| v.as_str())
+                            .ok_or_else(|| {
+                                ExecError::Registry(
+                                    "source operator missing 'source' in config".into(),
+                                )
+                            })?;
+
                     // Get schema from config or use default
                     let schema: Schema = if let Some(schema_val) = config.get("schema") {
                         serde_json::from_value(schema_val.clone())
@@ -103,7 +113,7 @@ impl Engine {
                     } else {
                         Schema::new(vec![])
                     };
-                    
+
                     Box::new(SourceOp {
                         source_uri: source_uri.to_string(),
                         schema,
@@ -111,15 +121,17 @@ impl Engine {
                         #[cfg(feature = "parquet")]
                         parquet_reader: Arc::new(Mutex::new(None)),
                     })
-                },
+                }
                 "sink" => {
-                    let destination = config.get("destination")
+                    let destination = config
+                        .get("destination")
                         .and_then(|v| v.as_str())
                         .unwrap_or("");
-                    let format = config.get("format")
+                    let format = config
+                        .get("format")
                         .and_then(|v| v.as_str())
                         .unwrap_or("csv");
-                    
+
                     Box::new(SinkOp {
                         destination: destination.to_string(),
                         format: format.to_string(),
@@ -127,7 +139,7 @@ impl Engine {
                         #[cfg(feature = "parquet")]
                         parquet_writer: std::sync::Arc::new(std::sync::Mutex::new(None)),
                     })
-                },
+                }
                 "filter" => {
                     let mut op = emsqrt_operators::filter::Filter::default();
                     if let Some(expr) = config.get("expr").and_then(|v| v.as_str()) {
@@ -203,6 +215,38 @@ impl Engine {
                     }
                     Box::new(op)
                 }
+                "window" => {
+                    let partitions = json_to_vec_strings(config.get("partitions"));
+                    let order_by = json_to_vec_strings(config.get("order_by"));
+                    let functions = parse_window_functions(config.get("functions"));
+                    Box::new(WindowOp {
+                        partitions,
+                        order_by,
+                        functions,
+                    })
+                }
+                "lateral_explode" => {
+                    let column = config
+                        .get("column")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("value")
+                        .to_string();
+                    let alias = config
+                        .get("alias")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("exploded")
+                        .to_string();
+                    let delimiter = config
+                        .get("delimiter")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(",")
+                        .to_string();
+                    Box::new(LateralExplodeOp {
+                        column,
+                        alias,
+                        delimiter,
+                    })
+                }
                 other => self.registry.make(other).ok_or_else(|| {
                     ExecError::Registry(format!("unknown operator key '{other}'"))
                 })?,
@@ -236,15 +280,26 @@ impl Engine {
 
             // Calculate input sizes for error context
             let input_rows: usize = inputs.iter().map(|batch| batch.num_rows()).sum();
-            let input_bytes: usize = inputs.iter().map(|batch| {
-                batch.columns.iter().map(|col| col.values.len() * 8).sum::<usize>()
-            }).sum();
+            let input_bytes: usize = inputs
+                .iter()
+                .map(|batch| {
+                    batch
+                        .columns
+                        .iter()
+                        .map(|col| col.values.len() * 8)
+                        .sum::<usize>()
+                })
+                .sum();
 
             // Build error context with operator and block information
             let operator_name = op.name();
             let context = format!(
                 "operator '{}' (op_id={}, block_id={}, input_rows={}, input_bytes={})",
-                operator_name, b.op.get(), b.id.get(), input_rows, input_bytes
+                operator_name,
+                b.op.get(),
+                b.id.get(),
+                input_rows,
+                input_bytes
             );
 
             // Try to execute with retry logic for recoverable errors
@@ -291,7 +346,7 @@ impl Engine {
         max_retries: u32,
     ) -> Result<RowBatch, OpError> {
         let mut last_error = None;
-        
+
         for attempt in 0..=max_retries {
             match op.eval_block(inputs, &self.budget) {
                 Ok(batch) => return Ok(batch),
@@ -309,12 +364,14 @@ impl Engine {
                 }
             }
         }
-        
+
         // Should not reach here, but handle gracefully
         match last_error {
             Some(e) => Err(e.with_context(context)),
-            None => Err(OpError::Exec(format!("execution failed after {} retries", max_retries))
-                .with_context(context)),
+            None => Err(
+                OpError::Exec(format!("execution failed after {} retries", max_retries))
+                    .with_context(context),
+            ),
         }
     }
 }
@@ -336,6 +393,54 @@ fn xor_hashes(a: Hash256, b: Hash256) -> Hash256 {
     Hash256(out)
 }
 
+fn json_to_vec_strings(value: Option<&serde_json::Value>) -> Vec<String> {
+    value
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|item| item.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn parse_window_functions(value: Option<&serde_json::Value>) -> Vec<WindowFnSpec> {
+    let mut specs = Vec::new();
+    let array = match value.and_then(|v| v.as_array()) {
+        Some(arr) => arr,
+        None => return specs,
+    };
+    for entry in array {
+        let alias = entry
+            .get("alias")
+            .and_then(|v| v.as_str())
+            .unwrap_or("window_fn")
+            .to_string();
+        if let Some(func_obj) = entry.get("function").and_then(|v| v.as_object()) {
+            if let Some(kind) = func_obj.get("kind").and_then(|v| v.as_str()) {
+                match kind {
+                    "row_number" => specs.push(WindowFnSpec {
+                        alias: alias.clone(),
+                        kind: WindowFnKind::RowNumber,
+                    }),
+                    "sum" => {
+                        if let Some(column) = func_obj.get("column").and_then(|v| v.as_str()) {
+                            specs.push(WindowFnSpec {
+                                alias: alias.clone(),
+                                kind: WindowFnKind::Sum {
+                                    column: column.to_string(),
+                                },
+                            });
+                        }
+                    }
+                    _ => continue,
+                }
+            }
+        }
+    }
+    specs
+}
+
 // --- placeholder source/sink operators (until real IO is wired) ---
 
 /// Detect file format from URI/path (by extension or explicit format parameter).
@@ -348,12 +453,12 @@ fn detect_file_format(uri: &str, format_param: Option<&str>) -> &'static str {
             _ => return "csv", // Default fallback
         }
     }
-    
+
     // Detect by file extension
     if uri.ends_with(".parquet") || uri.ends_with(".parq") {
         return "parquet";
     }
-    
+
     // Default to CSV
     "csv"
 }
@@ -394,17 +499,17 @@ impl Operator for SourceOp {
         } else {
             &self.source_uri
         };
-        
+
         // Detect file format
-        let format = detect_file_format(file_path, None);
-        
+        let _format = detect_file_format(file_path, None);
+
         // Handle Parquet files
         #[cfg(feature = "parquet")]
-        if format == "parquet" {
+        if _format == "parquet" {
             use emsqrt_io::readers::parquet::ParquetReader;
-            
+
             let mut reader_guard = self.parquet_reader.lock().unwrap();
-            
+
             // Initialize reader on first call
             if reader_guard.is_none() {
                 // Determine projection from schema if provided
@@ -413,15 +518,17 @@ impl Operator for SourceOp {
                 } else {
                     Some(self.schema.fields.iter().map(|f| f.name.clone()).collect())
                 };
-                
-                let reader = ParquetReader::from_path(file_path, projection, 10000)
-                    .map_err(|e| OpError::Exec(format!("failed to create Parquet reader: {}", e)))?;
-                
+
+                let reader =
+                    ParquetReader::from_path(file_path, projection, 10000).map_err(|e| {
+                        OpError::Exec(format!("failed to create Parquet reader: {}", e))
+                    })?;
+
                 // If schema was not provided, infer from Parquet file
                 // For now, we use the provided schema or the reader's schema
                 *reader_guard = Some(reader);
             }
-            
+
             // Read next batch
             if let Some(ref mut reader) = *reader_guard {
                 match reader.next_batch() {
@@ -429,7 +536,10 @@ impl Operator for SourceOp {
                     Ok(None) => {
                         // End of file - return empty batch with correct schema
                         return Ok(RowBatch {
-                            columns: self.schema.fields.iter()
+                            columns: self
+                                .schema
+                                .fields
+                                .iter()
                                 .map(|f| emsqrt_core::types::Column {
                                     name: f.name.clone(),
                                     values: Vec::new(),
@@ -441,29 +551,32 @@ impl Operator for SourceOp {
                 }
             }
         }
-        
+
         // Read CSV file with provided schema (default/fallback)
-        use std::fs::File;
         use emsqrt_core::types::{Column, Scalar};
-        
-        let file = File::open(file_path)
-            .map_err(|e| OpError::Exec(format!("failed to open CSV file '{}': {}", file_path, e)))?;
-        
+        use std::fs::File;
+
+        let file = File::open(file_path).map_err(|e| {
+            OpError::Exec(format!("failed to open CSV file '{}': {}", file_path, e))
+        })?;
+
         let mut rdr = ::csv::ReaderBuilder::new()
             .has_headers(true)
             .flexible(true)
             .from_reader(file);
-        
+
         // Build column index mapping from schema field names
-        let headers = rdr.headers()
+        let headers = rdr
+            .headers()
             .map_err(|e| OpError::Exec(format!("failed to read CSV headers: {}", e)))?;
-        
-        let col_indices: Vec<Option<usize>> = self.schema.fields.iter()
-            .map(|field| {
-                headers.iter().position(|h| h.trim() == field.name.trim())
-            })
+
+        let col_indices: Vec<Option<usize>> = self
+            .schema
+            .fields
+            .iter()
+            .map(|field| headers.iter().position(|h| h.trim() == field.name.trim()))
             .collect();
-        
+
         // Verify all required columns are found
         for (field, col_idx_opt) in self.schema.fields.iter().zip(col_indices.iter()) {
             if col_idx_opt.is_none() {
@@ -474,20 +587,23 @@ impl Operator for SourceOp {
                 )));
             }
         }
-        
+
         // Initialize columns based on schema
-        let mut columns: Vec<Column> = self.schema.fields.iter()
+        let mut columns: Vec<Column> = self
+            .schema
+            .fields
+            .iter()
             .map(|field| Column {
                 name: field.name.clone(),
                 values: Vec::new(),
             })
             .collect();
-        
+
         // Read rows and populate columns
         // Skip rows that were already read by previous blocks
         let mut file_pos = self.file_position.lock().unwrap();
         let skip_rows = *file_pos;
-        
+
         // Skip header + already-read rows
         let mut row_count = 0;
         let mut skipped = 0;
@@ -497,72 +613,69 @@ impl Operator for SourceOp {
                 skipped += 1;
                 continue; // Skip this row, don't process it
             }
-            
+
             // We've skipped enough - now process this row
-            
-            let record = result
-                .map_err(|e| OpError::Exec(format!("failed to read CSV record: {}", e)))?;
-            
+
+            let record =
+                result.map_err(|e| OpError::Exec(format!("failed to read CSV record: {}", e)))?;
+
             for (col_idx, field) in self.schema.fields.iter().enumerate() {
                 let value = if let Some(csv_col_idx) = col_indices[col_idx] {
                     record.get(csv_col_idx).unwrap_or("")
                 } else {
                     ""
                 };
-                
+
                 // Parse value based on schema type
                 let scalar = match field.data_type {
-                    emsqrt_core::schema::DataType::Int32 => {
-                        value.parse::<i32>()
-                            .map(Scalar::I32)
-                            .unwrap_or(Scalar::Null)
-                    }
-                    emsqrt_core::schema::DataType::Int64 => {
-                        value.parse::<i64>()
-                            .map(Scalar::I64)
-                            .unwrap_or(Scalar::Null)
-                    }
-                    emsqrt_core::schema::DataType::Float32 => {
-                        value.parse::<f32>()
-                            .map(Scalar::F32)
-                            .unwrap_or(Scalar::Null)
-                    }
-                    emsqrt_core::schema::DataType::Float64 => {
-                        value.parse::<f64>()
-                            .map(Scalar::F64)
-                            .unwrap_or(Scalar::Null)
-                    }
-                    emsqrt_core::schema::DataType::Boolean => {
-                        value.parse::<bool>()
-                            .map(Scalar::Bool)
-                            .unwrap_or(Scalar::Null)
-                    }
+                    emsqrt_core::schema::DataType::Int32 => value
+                        .parse::<i32>()
+                        .map(Scalar::I32)
+                        .unwrap_or(Scalar::Null),
+                    emsqrt_core::schema::DataType::Int64 => value
+                        .parse::<i64>()
+                        .map(Scalar::I64)
+                        .unwrap_or(Scalar::Null),
+                    emsqrt_core::schema::DataType::Float32 => value
+                        .parse::<f32>()
+                        .map(Scalar::F32)
+                        .unwrap_or(Scalar::Null),
+                    emsqrt_core::schema::DataType::Float64 => value
+                        .parse::<f64>()
+                        .map(Scalar::F64)
+                        .unwrap_or(Scalar::Null),
+                    emsqrt_core::schema::DataType::Boolean => value
+                        .parse::<bool>()
+                        .map(Scalar::Bool)
+                        .unwrap_or(Scalar::Null),
                     _ => Scalar::Str(value.to_string()),
                 };
-                
+
                 columns[col_idx].values.push(scalar);
             }
-            
+
             row_count += 1;
             if row_count >= 10000 {
                 break; // Limit batch size
             }
         }
-        
+
         // Update file position for next block
         *file_pos += row_count;
-        
+
         // Ensure all columns have the same number of values
         let num_rows = columns.first().map(|c| c.values.len()).unwrap_or(0);
         for col in &mut columns {
             if col.values.len() != num_rows {
                 return Err(OpError::Exec(format!(
                     "column '{}' has {} values but expected {}",
-                    col.name, col.values.len(), num_rows
+                    col.name,
+                    col.values.len(),
+                    num_rows
                 )));
             }
         }
-        
+
         // If we skipped rows but didn't read any new ones, we've reached the end
         // This is fine - return empty batch with correct column structure
         if row_count == 0 {
@@ -575,7 +688,7 @@ impl Operator for SourceOp {
             // Otherwise, this is the first read and we got nothing - that's an error
             return Err(OpError::Exec("no data in CSV file".into()));
         }
-        
+
         Ok(RowBatch { columns })
     }
 }
@@ -586,7 +699,8 @@ struct SinkOp {
     writer_initialized: std::sync::Arc<std::sync::Mutex<bool>>,
     // Parquet writer state (when writing Parquet files)
     #[cfg(feature = "parquet")]
-    parquet_writer: std::sync::Arc<std::sync::Mutex<Option<emsqrt_io::writers::parquet::ParquetWriter>>>,
+    parquet_writer:
+        std::sync::Arc<std::sync::Mutex<Option<emsqrt_io::writers::parquet::ParquetWriter>>>,
 }
 
 #[cfg(feature = "parquet")]
@@ -622,9 +736,10 @@ impl Operator for SinkOp {
         inputs: &[RowBatch],
         _budget: &dyn emsqrt_core::budget::MemoryBudget<Guard = emsqrt_mem::guard::BudgetGuardImpl>,
     ) -> Result<RowBatch, OpError> {
-        let input = inputs.get(0)
+        let input = inputs
+            .get(0)
             .ok_or_else(|| OpError::Exec("sink requires one input".into()))?;
-        
+
         // Check if input is empty (shouldn't happen, but handle gracefully)
         if input.num_rows() == 0 {
             // Empty batch - still write to ensure file exists, but skip if no columns
@@ -632,14 +747,14 @@ impl Operator for SinkOp {
                 return Ok(RowBatch { columns: vec![] });
             }
         }
-        
+
         // Strip file:// prefix if present
         let file_path = if self.destination.starts_with("file://") {
             &self.destination[7..]
         } else {
             &self.destination
         };
-        
+
         // Write based on format
         // Handle Parquet format
         #[cfg(feature = "parquet")]
@@ -647,111 +762,147 @@ impl Operator for SinkOp {
             use emsqrt_io::arrow_convert::emsqrt_to_arrow_schema;
             use emsqrt_io::writers::parquet::ParquetWriter;
             use std::sync::Arc;
-            
+
             let mut writer_guard = self.parquet_writer.lock().unwrap();
-            
+
             // Initialize writer on first write
             if writer_guard.is_none() {
                 // Infer schema from first batch
                 if input.columns.is_empty() {
-                    return Err(OpError::Exec("Cannot write Parquet file: empty batch with no schema".into()));
+                    return Err(OpError::Exec(
+                        "Cannot write Parquet file: empty batch with no schema".into(),
+                    ));
                 }
-                
+
                 // Build schema from column names and types
-                let fields: Vec<emsqrt_core::schema::Field> = input.columns.iter()
+                let fields: Vec<emsqrt_core::schema::Field> = input
+                    .columns
+                    .iter()
                     .map(|col| {
                         // Infer type from first non-null value, default to Utf8
-                        let data_type = col.values.iter()
-                            .find_map(|v| {
-                                match v {
-                                    emsqrt_core::types::Scalar::Null => None,
-                                    emsqrt_core::types::Scalar::Bool(_) => Some(emsqrt_core::schema::DataType::Boolean),
-                                    emsqrt_core::types::Scalar::I32(_) => Some(emsqrt_core::schema::DataType::Int32),
-                                    emsqrt_core::types::Scalar::I64(_) => Some(emsqrt_core::schema::DataType::Int64),
-                                    emsqrt_core::types::Scalar::F32(_) => Some(emsqrt_core::schema::DataType::Float32),
-                                    emsqrt_core::types::Scalar::F64(_) => Some(emsqrt_core::schema::DataType::Float64),
-                                    emsqrt_core::types::Scalar::Str(_) => Some(emsqrt_core::schema::DataType::Utf8),
-                                    emsqrt_core::types::Scalar::Bin(_) => Some(emsqrt_core::schema::DataType::Binary),
+                        let data_type = col
+                            .values
+                            .iter()
+                            .find_map(|v| match v {
+                                emsqrt_core::types::Scalar::Null => None,
+                                emsqrt_core::types::Scalar::Bool(_) => {
+                                    Some(emsqrt_core::schema::DataType::Boolean)
+                                }
+                                emsqrt_core::types::Scalar::I32(_) => {
+                                    Some(emsqrt_core::schema::DataType::Int32)
+                                }
+                                emsqrt_core::types::Scalar::I64(_) => {
+                                    Some(emsqrt_core::schema::DataType::Int64)
+                                }
+                                emsqrt_core::types::Scalar::F32(_) => {
+                                    Some(emsqrt_core::schema::DataType::Float32)
+                                }
+                                emsqrt_core::types::Scalar::F64(_) => {
+                                    Some(emsqrt_core::schema::DataType::Float64)
+                                }
+                                emsqrt_core::types::Scalar::Str(_) => {
+                                    Some(emsqrt_core::schema::DataType::Utf8)
+                                }
+                                emsqrt_core::types::Scalar::Bin(_) => {
+                                    Some(emsqrt_core::schema::DataType::Binary)
                                 }
                             })
                             .unwrap_or(emsqrt_core::schema::DataType::Utf8);
-                        
+
                         emsqrt_core::schema::Field::new(&col.name, data_type, true)
                     })
                     .collect();
-                
+
                 let schema = emsqrt_core::schema::Schema::new(fields);
-                let writer = ParquetWriter::from_emsqrt_schema(file_path, &schema)
-                    .map_err(|e| OpError::Exec(format!("failed to create Parquet writer: {}", e)))?;
-                
+                let writer =
+                    ParquetWriter::from_emsqrt_schema(file_path, &schema).map_err(|e| {
+                        OpError::Exec(format!("failed to create Parquet writer: {}", e))
+                    })?;
+
                 *writer_guard = Some(writer);
             }
-            
+
             // Write batch
             if let Some(ref mut writer) = *writer_guard {
                 // If this is an empty batch after we've written data, close the writer
                 if input.num_rows() == 0 {
                     // Take the writer and close it
                     if let Some(w) = writer_guard.take() {
-                        w.close()
-                            .map_err(|e| OpError::Exec(format!("failed to close Parquet writer: {}", e)))?;
+                        w.close().map_err(|e| {
+                            OpError::Exec(format!("failed to close Parquet writer: {}", e))
+                        })?;
                     }
                 } else {
                     // Write non-empty batches
-                    writer.write_row_batch(input)
-                        .map_err(|e| OpError::Exec(format!("failed to write Parquet batch: {}", e)))?;
+                    writer.write_row_batch(input).map_err(|e| {
+                        OpError::Exec(format!("failed to write Parquet batch: {}", e))
+                    })?;
                 }
             }
-            
+
             return Ok(input.clone());
         }
-        
+
         // Write based on format
         // For CSV, we need to append to the file if it already exists (for multiple blocks)
         match self.format.as_str() {
             "csv" => {
                 use std::fs::OpenOptions;
-                use std::io::Write;
-                
+
                 let mut initialized = self.writer_initialized.lock().unwrap();
-                
+
                 // Determine if this is the first write or a subsequent append
                 let is_first_write = !*initialized;
-                
+
                 let file = if *initialized {
                     // Append mode for subsequent blocks
                     OpenOptions::new()
                         .create(true)
                         .append(true)
                         .open(file_path)
-                        .map_err(|e| OpError::Exec(format!("failed to open CSV file for append '{}': {}", file_path, e)))?
+                        .map_err(|e| {
+                            OpError::Exec(format!(
+                                "failed to open CSV file for append '{}': {}",
+                                file_path, e
+                            ))
+                        })?
                 } else {
                     // Create/truncate for first block
                     *initialized = true;
-                    std::fs::File::create(file_path)
-                        .map_err(|e| OpError::Exec(format!("failed to create CSV file '{}': {}", file_path, e)))?
+                    std::fs::File::create(file_path).map_err(|e| {
+                        OpError::Exec(format!("failed to create CSV file '{}': {}", file_path, e))
+                    })?
                 };
-                
+
                 // Only write header on first write
                 let mut writer = if is_first_write {
                     CsvWriter::to_writer(file)
                 } else {
                     CsvWriter::to_writer_skip_header(file)
                 };
-                
+
                 // Always write the batch - CsvWriter handles headers and empty batches correctly
                 // If this is the first write, header will be written
                 // If this is a subsequent write and batch is empty, nothing happens (which is fine)
-                writer.write_batch(input)
-                    .map_err(|e| OpError::Exec(format!("failed to write CSV batch with {} rows, {} cols: {}", input.num_rows(), input.columns.len(), e)))?;
-                
+                writer.write_batch(input).map_err(|e| {
+                    OpError::Exec(format!(
+                        "failed to write CSV batch with {} rows, {} cols: {}",
+                        input.num_rows(),
+                        input.columns.len(),
+                        e
+                    ))
+                })?;
+
                 // CsvWriter already flushes in write_batch, so data should be written
             }
             _ => {
-                return Err(OpError::Exec(format!("unsupported sink format: {}", self.format)));
+                return Err(OpError::Exec(format!(
+                    "unsupported sink format: {}",
+                    self.format
+                )));
             }
         }
-        
+
         // Return empty batch (sink is terminal)
         Ok(RowBatch { columns: vec![] })
     }

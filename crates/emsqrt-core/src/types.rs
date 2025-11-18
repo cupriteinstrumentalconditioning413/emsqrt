@@ -101,7 +101,10 @@ impl RowBatch {
         // Reorder all columns based on sorted indices
         for col in &mut self.columns {
             let original = col.values.clone();
-            col.values = indices.iter().map(|(_, idx)| original[*idx].clone()).collect();
+            col.values = indices
+                .iter()
+                .map(|(_, idx)| original[*idx].clone())
+                .collect();
         }
 
         Ok(())
@@ -111,7 +114,11 @@ impl RowBatch {
     ///
     /// Returns a vector of partition indices (one per row), computed by
     /// hashing the specified columns and taking modulo num_partitions.
-    pub fn hash_columns(&self, hash_keys: &[String], num_partitions: usize) -> Result<Vec<usize>, String> {
+    pub fn hash_columns(
+        &self,
+        hash_keys: &[String],
+        num_partitions: usize,
+    ) -> Result<Vec<usize>, String> {
         let num_rows = self.num_rows();
         if num_rows == 0 {
             return Ok(Vec::new());
@@ -157,12 +164,12 @@ impl RowBatch {
         }
 
         let mut columns = Vec::with_capacity(left.columns.len() + right.columns.len());
-        
+
         // Add left columns
         for col in &left.columns {
             columns.push(col.clone());
         }
-        
+
         // Add right columns (with suffix if name conflicts)
         for col in &right.columns {
             let mut new_col = col.clone();
@@ -195,7 +202,7 @@ fn scalar_tuple_cmp(a: &[Scalar], b: &[Scalar]) -> std::cmp::Ordering {
 fn scalar_cmp(a: &Scalar, b: &Scalar) -> std::cmp::Ordering {
     use std::cmp::Ordering;
     use Scalar::*;
-    
+
     match (a, b) {
         (Null, Null) => Ordering::Equal,
         (Null, _) => Ordering::Less,
@@ -250,18 +257,32 @@ fn scalar_type_order(s: &Scalar) -> u8 {
 /// Hash a scalar value into a hasher.
 fn hash_scalar(scalar: &Scalar, hasher: &mut blake3::Hasher) {
     use Scalar::*;
-    
+
     // Write type discriminant first
     hasher.update(&[scalar_type_order(scalar)]);
-    
+
     match scalar {
         Null => {}
-        Bool(b) => { hasher.update(&[*b as u8]); }
-        I32(i) => { hasher.update(&i.to_le_bytes()); }
-        I64(i) => { hasher.update(&i.to_le_bytes()); }
-        F32(f) => { hasher.update(&f.to_bits().to_le_bytes()); }
-        F64(f) => { hasher.update(&f.to_bits().to_le_bytes()); }
-        Str(s) => { hasher.update(s.as_bytes()); }
-        Bin(b) => { hasher.update(b); }
+        Bool(b) => {
+            hasher.update(&[*b as u8]);
+        }
+        I32(i) => {
+            hasher.update(&i.to_le_bytes());
+        }
+        I64(i) => {
+            hasher.update(&i.to_le_bytes());
+        }
+        F32(f) => {
+            hasher.update(&f.to_bits().to_le_bytes());
+        }
+        F64(f) => {
+            hasher.update(&f.to_bits().to_le_bytes());
+        }
+        Str(s) => {
+            hasher.update(s.as_bytes());
+        }
+        Bin(b) => {
+            hasher.update(b);
+        }
     }
 }
